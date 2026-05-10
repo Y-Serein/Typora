@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YS Writer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app" data-theme="paper" data-mode="live">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">YS</span>
+          <div>
+            <strong>YS Writer</strong>
+            <span>Markdown Studio</span>
+          </div>
+        </div>
+
+        <nav class="toolbar" aria-label="编辑工具">
+          <button type="button" data-command="new" title="新建文档">+</button>
+          <button type="button" data-command="open" title="打开 Markdown">⌘O</button>
+          <button type="button" data-command="save" title="保存到浏览器">⌘S</button>
+          <span class="divider"></span>
+          <button type="button" data-command="bold" title="加粗">B</button>
+          <button type="button" data-command="italic" title="斜体"><em>I</em></button>
+          <button type="button" data-command="heading" title="标题">H</button>
+          <button type="button" data-command="quote" title="引用">❝</button>
+          <button type="button" data-command="code" title="代码块">{ }</button>
+          <button type="button" data-command="table" title="表格">▦</button>
+          <button type="button" data-command="link" title="链接">🔗</button>
+          <span class="divider"></span>
+          <button type="button" data-command="live" title="实时写作">✎</button>
+          <button type="button" data-command="source" title="源码模式">MD</button>
+          <button type="button" data-command="split" title="分屏预览">◐</button>
+          <button type="button" data-command="preview" title="预览模式">◉</button>
+        </nav>
+
+        <div class="right-tools">
+          <label class="search">
+            <span>⌕</span>
+            <input id="searchInput" type="search" placeholder="搜索" autocomplete="off" />
+          </label>
+          <button type="button" id="focusToggle" class="text-button">专注</button>
+          <button type="button" id="typewriterToggle" class="text-button">打字机</button>
+          <select id="themeSelect" aria-label="主题">
+            <option value="paper">纸张</option>
+            <option value="ink">墨色</option>
+            <option value="mist">雾灰</option>
+          </select>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <section>
+          <div class="panel-title">
+            <span>文档</span>
+            <button type="button" data-command="new" title="新建文档">+</button>
+          </div>
+          <div id="fileList" class="file-list"></div>
+        </section>
+
+        <section>
+          <div class="panel-title">
+            <span>大纲</span>
+          </div>
+          <nav id="outline" class="outline" aria-label="文档大纲"></nav>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="document-bar">
+          <input id="docTitle" type="text" spellcheck="false" />
+          <div class="export-menu">
+            <button type="button" data-command="download">导出 MD</button>
+            <button type="button" data-command="html">导出 HTML</button>
+            <button type="button" data-command="print">PDF/打印</button>
+          </div>
+        </div>
+
+        <div class="editor-shell">
+          <section class="live-pane" aria-label="实时写作编辑器">
+            <article id="liveEditor" class="live-editor" contenteditable="true" spellcheck="true"></article>
+          </section>
+          <section class="editor-pane" aria-label="Markdown 源码编辑器">
+            <textarea id="editor" spellcheck="true"></textarea>
+          </section>
+          <section class="preview-pane" aria-label="即时预览">
+            <article id="preview" class="preview"></article>
+          </section>
+        </div>
+      </main>
+
+      <footer class="statusbar">
+        <span id="saveState">未保存</span>
+        <span id="stats">0 字 · 0 行 · 0 分钟</span>
+        <span id="searchState"></span>
+      </footer>
+
+      <input id="fileInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden />
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
