@@ -17,6 +17,7 @@
 - WSLg 启动慢修正：Linux 下创建 Tauri WebView 前设置 `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DISABLE_DMABUF_RENDERER`、`LIBGL_ALWAYS_SOFTWARE`，避开 WebKit/GL 在 WSLg 里探测 EGL/Zink 的卡顿路径。
 - 启动慢再修正：默认启动进入轻量 Markdown textarea，不初始化 Milkdown；顶部菜单 `Rich Edit` 才动态加载 Milkdown。
 - Windows 打包准备：新增 `T_tools/build_windows.ps1`，用于在 Windows PowerShell 下构建 NSIS `.exe` 安装包。
+- Windows 打包脚本修正：脚本现在会输出 Node/npm/cargo 版本、检查 Tauri CLI 是否存在、检查外部命令退出码，并递归搜索 `src-tauri\target` 下的 `.exe/.msi`，避免构建失败后误报只找不到 bundle 目录。
 - Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 会跟随变化；没有一级标题时保留原标题。
 - 左侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
 - 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
@@ -43,6 +44,7 @@
 - WSLg WebView 环境补丁验证：`npm run build` 通过，`cargo check` 通过；连续两次 `timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 不再输出 `libEGL / MESA / ZINK` 警告。第二次启动日志中 Vite ready 约 745ms，Rust dev profile 约 0.36s；`timeout` 退出码 124 是主动结束。
 - 轻量启动补丁验证：`npm run build` 通过，主入口 JS 约 149KB，Milkdown 独立 chunk 约 363KB 且默认不加载；`cargo check` 通过；`timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 日志正常。
 - Windows 打包脚本验证：WSL 下运行 `npm run build` 通过，`cargo check` 通过；`T_tools/build_windows.ps1` 需在 Windows PowerShell 中执行才能生成 `.exe`。
+- Windows 打包脚本修正验证：WSL 下 `npm run build` 通过，`cargo check` 通过；Windows 上需重新运行脚本查看真实失败点或产物路径。
 
 ## 下一步计划（3-5条actionable)
 
