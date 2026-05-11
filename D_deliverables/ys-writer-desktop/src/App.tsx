@@ -174,16 +174,10 @@ export default function App() {
 
   return (
     <div className="desktop-shell" data-theme={theme}>
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">YS</span>
-          <div>
-            <strong>YS Writer</strong>
-            <span>Local-first Markdown Desktop</span>
-          </div>
-        </div>
-
-        <div className="toolbar" aria-label="Primary toolbar">
+      <header className="menu-bar" aria-label="Application menu">
+        <div className="menu-group">
+          <strong className="menu-title">YS Writer</strong>
+          <button type="button" onClick={handleCreateCard}>New</button>
           <button type="button" className={`save-button ${saveStatus}`} onClick={handleSave}>
             {saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Failed" : "Save"}
           </button>
@@ -192,7 +186,7 @@ export default function App() {
           <button type="button" disabled>Redo</button>
         </div>
 
-        <div className="topbar-meta">
+        <div className="menu-status">
           <button type="button" onClick={() => setTheme(theme === "paper" ? "ink" : "paper")}>
             {theme === "paper" ? "Ink" : "Paper"}
           </button>
@@ -220,25 +214,23 @@ export default function App() {
         </nav>
 
         <div className="panel-heading compact">
-          <span>Whiteboards</span>
+          <span>Outline</span>
         </div>
-        <div className="placeholder-list">
-          <button type="button" disabled>Main Whiteboard</button>
+        <div className="outline-list">
+          {outline.length ? outline.map((item, index) => (
+            <button
+              key={`${item.text}-${index}`}
+              type="button"
+              className={`outline-item level-${item.level}`}
+              onClick={() => handleOutlineClick(index)}
+            >
+              {item.text}
+            </button>
+          )) : <p className="muted">No headings</p>}
         </div>
       </aside>
 
       <main className="editor-column">
-        <div className="document-strip">
-          <div>
-            <span className="eyebrow">Card</span>
-            <h1>{activeCard.title}</h1>
-          </div>
-          <div className="doc-actions">
-            <span>Markdown</span>
-            <span>Milkdown</span>
-          </div>
-        </div>
-
         <section ref={editorSurfaceRef} className="editor-surface" aria-label="Markdown editor">
           <MilkdownEditor
             key={activeCard.id}
@@ -247,40 +239,6 @@ export default function App() {
           />
         </section>
       </main>
-
-      <aside className="right-rail">
-        <section>
-          <div className="panel-heading">
-            <span>Outline</span>
-          </div>
-          <div className="outline-list">
-            {outline.length ? outline.map((item, index) => (
-              <button
-                key={`${item.text}-${index}`}
-                type="button"
-                className={`outline-item level-${item.level}`}
-                onClick={() => handleOutlineClick(index)}
-              >
-                {item.text}
-              </button>
-            )) : <p className="muted">No headings</p>}
-          </div>
-        </section>
-
-        <section>
-          <div className="panel-heading">
-            <span>Info</span>
-          </div>
-          <dl className="info-grid">
-            <dt>Tags</dt>
-            <dd>{activeCard.tagIds.length}</dd>
-            <dt>Backlinks</dt>
-            <dd>Reserved</dd>
-            <dt>Whiteboard</dt>
-            <dd>Reserved</dd>
-          </dl>
-        </section>
-      </aside>
     </div>
   );
 }

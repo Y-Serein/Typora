@@ -33,8 +33,8 @@ button {
 
 .desktop-shell {
   display: grid;
-  grid-template-columns: 270px minmax(520px, 1fr) 300px;
-  grid-template-rows: 58px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(620px, 1fr);
+  grid-template-rows: 36px minmax(0, 1fr);
   min-height: 100vh;
   background:
     linear-gradient(90deg, rgb(36 35 31 / 4%) 1px, transparent 1px) 0 0 / 30px 30px,
@@ -55,79 +55,52 @@ button {
   --shadow: 0 24px 70px rgb(0 0 0 / 24%);
 }
 
-.topbar {
+.menu-bar {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 270px 1fr 280px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   backdrop-filter: blur(18px);
-  padding: 0 14px;
+  padding: 0 10px 0 14px;
 }
 
-.brand {
+.menu-group,
+.menu-status {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
 }
 
-.brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid var(--ink);
-  border-radius: 50%;
-  font-family: var(--font-doc);
+.menu-title {
+  margin-right: 14px;
   font-size: 13px;
+  font-weight: 700;
 }
 
-.brand strong,
-.brand span {
-  display: block;
-}
-
-.brand span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.toolbar,
-.topbar-meta,
-.doc-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toolbar {
-  justify-content: center;
-}
-
-.topbar-meta {
-  justify-content: flex-end;
+.menu-status {
   color: var(--muted);
   font-size: 12px;
 }
 
-.toolbar button,
-.topbar-meta button,
+.menu-bar button,
 .panel-heading button,
 .placeholder-list button {
-  height: 32px;
+  height: 26px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--paper);
   color: var(--ink);
-  padding: 0 10px;
+  padding: 0 9px;
 }
 
-.toolbar button {
+.menu-bar button {
   transition: background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease;
 }
 
-.toolbar button:active:not(:disabled) {
+.menu-bar button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
@@ -150,16 +123,14 @@ button:disabled {
 }
 
 .left-rail,
-.right-rail {
+.editor-column {
   min-height: 0;
+}
+
+.left-rail {
   overflow: auto;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
-}
-
-.right-rail {
-  border-right: 0;
-  border-left: 1px solid var(--line);
 }
 
 .panel-heading {
@@ -227,43 +198,7 @@ button:disabled {
 }
 
 .editor-column {
-  display: grid;
-  grid-template-rows: 78px minmax(0, 1fr);
   min-width: 0;
-  min-height: 0;
-}
-
-.document-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 55%, transparent);
-  padding: 0 clamp(28px, 4vw, 56px);
-}
-
-.eyebrow {
-  display: block;
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-
-.document-strip h1 {
-  margin: 4px 0 0;
-  font-family: var(--font-doc);
-  font-size: 26px;
-  font-weight: 700;
-}
-
-.doc-actions span {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 12px;
-  padding: 5px 10px;
 }
 
 .editor-surface {

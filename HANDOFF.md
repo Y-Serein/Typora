@@ -13,8 +13,9 @@
 - Save 不再只更新时间戳；现在会把 cards 写入 localStorage，启动时优先恢复已保存 cards，读取失败或无数据才 fallback demo。
 - Save 按钮现在有点击反馈：成功后短暂显示 `Saved` 并变色，失败时显示 `Failed`。
 - 启动卡顿方向修正：`React.lazy` 拆 Milkdown 的方案已撤回，因为用户反馈变得更慢；当前改为移除 React dev `StrictMode`，避免 Milkdown 在开发模式被重复挂载初始化。
-- Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 和顶部 document-strip 会跟随变化；没有一级标题时保留原标题。
-- 右侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
+- 布局调整：把 Save/New/Export/Undo/Redo/Ink 放到顶部应用菜单栏；移除右侧常驻 Outline/Info 栏；Outline 移到左侧 Cards 下方；移除 P0 之外的 Whiteboards 占位。
+- Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 会跟随变化；没有一级标题时保留原标题。
+- 左侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
 - 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
 - WSLg/MESA/EGL warning 只记录，不作为 P0 阻塞。
 
@@ -35,14 +36,15 @@
 - 启动白屏错误方向：`React.lazy` 曾让主入口 JS 从约 512KB 降到约 150KB，但用户反馈实际更慢，已撤回。
 - 当前启动卡顿补丁验证：撤回懒加载并移除 `React.StrictMode` 后，`npm run build` 通过，`cargo check` 通过。
 - `npm run build` 重新出现 Milkdown/Vite chunk 超过 500KB 警告，当前为接受的回退结果。
+- 本轮布局补丁验证：`npm run build` 通过，`cargo check` 通过。
 
 ## 下一步计划（3-5条actionable)
 
 1. 运行桌面版手测：新建 Card，修改 `# 一级标题` 和正文，点击 Save，刷新或重启 dev 后确认内容恢复。
-2. 手测左侧 Cards 和顶部 document-strip 标题是否随第一行 `# xxx` 变化；删除一级标题后确认保留旧标题。
-3. 手测 Outline 点击是否能滚动到对应标题附近，尤其是同名标题和较长文档。
-4. 继续验证编辑器核心路径：普通段落、标题、列表、blockquote、代码块的 Enter/Backspace/Tab/Ctrl+Z。
-5. P0 稳定后，再考虑真实本地保存方案：先选文件系统还是嵌入式数据库，不要直接上同步或复杂数据层。
+2. 手测顶部菜单栏里的 New/Save/Ink 是否符合桌面应用习惯，Save 是否仍有反馈。
+3. 手测左侧 Cards 标题是否随第一行 `# xxx` 变化；删除一级标题后确认保留旧标题。
+4. 手测左侧 Outline 点击是否能滚动到对应标题附近，尤其是同名标题和较长文档。
+5. 继续验证编辑器核心路径：普通段落、标题、列表、blockquote、代码块的 Enter/Backspace/Tab/Ctrl+Z。
 
 ## 关键文件路径（相对路径，一行一个）
 
