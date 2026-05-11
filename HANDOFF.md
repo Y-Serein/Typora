@@ -16,6 +16,7 @@
 - 布局调整：把 Save/New/Export/Undo/Redo/Ink 放到顶部应用菜单栏；移除右侧常驻 Outline/Info 栏；Outline 移到左侧 Cards 下方；移除 P0 之外的 Whiteboards 占位。
 - WSLg 启动慢修正：Linux 下创建 Tauri WebView 前设置 `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DISABLE_DMABUF_RENDERER`、`LIBGL_ALWAYS_SOFTWARE`，避开 WebKit/GL 在 WSLg 里探测 EGL/Zink 的卡顿路径。
 - 启动慢再修正：默认启动进入轻量 Markdown textarea，不初始化 Milkdown；顶部菜单 `Rich Edit` 才动态加载 Milkdown。
+- Windows 渲染修正：生产包默认进入 `Rich Edit`，确保 Markdown 会渲染成标题/列表等；开发模式仍默认 `Plain Edit`，保留 WSLg 下快速启动路径。
 - Windows 打包准备：新增 `T_tools/build_windows.ps1`，用于在 Windows PowerShell 下构建 NSIS `.exe` 安装包。
 - Windows 打包脚本修正：脚本现在会输出 Node/npm/cargo 版本、检查 Tauri CLI 是否存在、检查外部命令退出码，并递归搜索 `src-tauri\target` 下的 `.exe/.msi`，避免构建失败后误报只找不到 bundle 目录。
 - Windows 打包图标修正：补充 `D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico`，解决 Windows `tauri-build` 报 `icons/icon.ico not found`。
@@ -48,6 +49,7 @@
 - Windows 打包脚本修正验证：WSL 下 `npm run build` 通过，`cargo check` 通过；Windows 上需重新运行脚本查看真实失败点或产物路径。
 - Windows icon 修正验证：`icon.ico` 是有效 Windows icon resource，包含 6 个尺寸；`cargo check` 通过。WSL 下 `npm run build` 当前失败，原因是共享 `node_modules` 缺少 Linux Rollup optional dependency `@rollup/rollup-linux-x64-gnu`，不是图标问题；为避免影响 Windows 打包环境，暂未在 WSL 重装依赖。
 - Windows 打包成功：`T_tools/build_windows.ps1` 已在 Windows PowerShell 生成 NSIS 安装包和 release exe，路径包括 `src-tauri\target\release\bundle\nsis\YS Writer_0.1.0_x64-setup.exe`、`src-tauri\target\release\ys-writer-desktop.exe`、`src-tauri\target\release\deps\ys_writer_desktop.exe`。
+- Windows 渲染修正验证：`cargo check` 通过；需要在 Windows PowerShell 重新运行 `T_tools/build_windows.ps1 -SkipInstall` 验证生产包默认 Rich Edit 渲染。
 
 ## 下一步计划（3-5条actionable)
 

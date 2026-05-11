@@ -20,6 +20,7 @@ type InitialWorkspace = PersistedWorkspace & {
 
 type SaveStatus = "idle" | "saved" | "error";
 type EditorMode = "plain" | "rich";
+const defaultEditorMode: EditorMode = import.meta.env.PROD ? "rich" : "plain";
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -139,7 +140,7 @@ export default function App() {
   );
   const [saveError, setSaveError] = useState<string | null>(initialWorkspace.loadError);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [editorMode, setEditorMode] = useState<EditorMode>("plain");
+  const [editorMode, setEditorMode] = useState<EditorMode>(defaultEditorMode);
   const [theme, setTheme] = useState<"paper" | "ink">("paper");
   const editorSurfaceRef = useRef<HTMLElement | null>(null);
   const plainEditorRef = useRef<HTMLTextAreaElement | null>(null);
