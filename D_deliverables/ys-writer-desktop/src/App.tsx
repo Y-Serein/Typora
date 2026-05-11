@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MilkdownEditor } from "./components/MilkdownEditor";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { demoWorkspace } from "./data/demoWorkspace";
 import type { Card } from "./domain/model";
 import "./styles.css";
+
+const MilkdownEditor = lazy(() => import("./components/MilkdownEditor").then((module) => ({
+  default: module.MilkdownEditor,
+})));
 
 const WORKSPACE_STORAGE_KEY = "ys-writer.workspace.v1";
 
@@ -16,6 +19,7 @@ type InitialWorkspace = PersistedWorkspace & {
 };
 
 type SaveStatus = "idle" | "saved" | "error";
+type EditorMode = "plain" | "rich";
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -36,6 +40,20 @@ function extractFirstLineTitle(markdown: string) {
   const firstLine = markdown.split(/\r?\n/, 1)[0] ?? "";
   const match = firstLine.match(/^#(?!#)\s+(.+?)\s*$/);
   return match?.[1].trim() || null;
+}
+
+function getHeadingOffsets(markdown: string) {
+  let offset = 0;
+  const offsets: Array<{ start: number; end: number }> = [];
+
+  for (const line of markdown.split("\n")) {
+    if (/^(#{1,3})\s+(.+)$/.test(line)) {
+      offsets.push({ start: offset, end: offset + line.length });
+    }
+    offset += line.length + 1;
+  }
+
+  return offsets;
 }
 
 function createCard(): Card {
@@ -121,8 +139,10 @@ export default function App() {
   );
   const [saveError, setSaveError] = useState<string | null>(initialWorkspace.loadError);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [editorMode, setEditorMode] = useState<EditorMode>("plain");
   const [theme, setTheme] = useState<"paper" | "ink">("paper");
   const editorSurfaceRef = useRef<HTMLElement | null>(null);
+  const plainEditorRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeCard = cards.find((card) => card.id === activeCardId) ?? cards[0];
   const outline = useMemo(() => extractOutline(activeCard.markdown), [activeCard.markdown]);
@@ -167,10 +187,19 @@ export default function App() {
   }, []);
 
   const handleOutlineClick = useCallback((index: number) => {
+    if (editorMode === "plain") {
+      const target = getHeadingOffsets(activeCard.markdown)[index];
+      if (!target) return;
+
+      plainEditorRef.current?.focus();
+      plainEditorRef.current?.setSelectionRange(target.start, target.end);
+      return;
+    }
+
     const headings = editorSurfaceRef.current?.querySelectorAll(".milkdown h1, .milkdown h2, .milkdown h3");
     const heading = headings?.item(index);
     heading?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  }, [activeCard.markdown, editorMode]);
 
   return (
     <div className="desktop-shell" data-theme={theme}>
@@ -184,6 +213,13 @@ export default function App() {
           <button type="button" disabled>Export</button>
           <button type="button" disabled>Undo</button>
           <button type="button" disabled>Redo</button>
+          <button
+            type="button"
+            className={editorMode === "rich" ? "active-mode" : ""}
+            onClick={() => setEditorMode(editorMode === "plain" ? "rich" : "plain")}
+          >
+            {editorMode === "plain" ? "Rich Edit" : "Plain Edit"}
+          </button>
         </div>
 
         <div className="menu-status">
@@ -232,11 +268,23 @@ export default function App() {
 
       <main className="editor-column">
         <section ref={editorSurfaceRef} className="editor-surface" aria-label="Markdown editor">
-          <MilkdownEditor
-            key={activeCard.id}
-            markdown={activeCard.markdown}
-            onChange={handleMarkdownChange}
-          />
+          {editorMode === "plain" ? (
+            <textarea
+              ref={plainEditorRef}
+              className="markdown-editor"
+              value={activeCard.markdown}
+              onChange={(event) => handleMarkdownChange(event.target.value)}
+              spellCheck
+            />
+          ) : (
+            <Suspense fallback={<div className="editor-loading">Loading rich editor...</div>}>
+              <MilkdownEditor
+                key={activeCard.id}
+                markdown={activeCard.markdown}
+                onChange={handleMarkdownChange}
+              />
+            </Suspense>
+          )}
         </section>
       </main>
     </div>

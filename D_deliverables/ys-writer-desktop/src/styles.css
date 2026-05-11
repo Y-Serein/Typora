@@ -116,6 +116,11 @@ button {
   color: var(--accent);
 }
 
+.menu-bar button.active-mode {
+  border-color: var(--accent-cool);
+  color: var(--accent-cool);
+}
+
 button:disabled {
   color: var(--muted);
   cursor: not-allowed;
@@ -205,6 +210,30 @@ button:disabled {
   min-height: 0;
   overflow: auto;
   background: var(--paper);
+}
+
+.markdown-editor,
+.editor-loading {
+  display: block;
+  width: 100%;
+  max-width: 820px;
+  min-height: calc(100vh - 36px);
+  margin: 0 auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 46px clamp(34px, 5vw, 82px) 88px;
+}
+
+.markdown-editor {
+  resize: none;
+  font: 18px/1.76 var(--font-doc);
+}
+
+.editor-loading {
+  color: var(--muted);
+  font: 14px/1.5 var(--font-ui);
 }
 
 .milkdown {
