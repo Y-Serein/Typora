@@ -272,14 +272,6 @@ button:disabled {
   background: var(--paper);
 }
 
-.editor-loading {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 46px clamp(34px, 5vw, 82px);
-  color: var(--muted);
-  font: 14px/1.5 var(--font-ui);
-}
-
 .milkdown {
   max-width: 820px;
   min-height: 100%;
