@@ -1,0 +1,52 @@
+export type ID = string;
+
+export type Card = {
+  id: ID;
+  title: string;
+  markdown: string;
+  tagIds: ID[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Whiteboard = {
+  id: ID;
+  title: string;
+  itemIds: ID[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WhiteboardItem = {
+  id: ID;
+  whiteboardId: ID;
+  cardId: ID;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+};
+
+export type Tag = {
+  id: ID;
+  name: string;
+  color: string;
+  cardIds: ID[];
+};
+
+export type Link = {
+  id: ID;
+  fromCardId: ID;
+  toCardId: ID;
+  kind: "manual" | "mention";
+  createdAt: string;
+};
+
+export type WorkspaceSnapshot = {
+  cards: Card[];
+  whiteboards: Whiteboard[];
+  whiteboardItems: WhiteboardItem[];
+  tags: Tag[];
+  links: Link[];
+};
