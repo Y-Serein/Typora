@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MilkdownEditor } from "./components/MilkdownEditor";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { demoWorkspace } from "./data/demoWorkspace";
 import type { Card } from "./domain/model";
 import "./styles.css";
+
+const MilkdownEditor = lazy(() => import("./components/MilkdownEditor").then((module) => ({
+  default: module.MilkdownEditor,
+})));
 
 const WORKSPACE_STORAGE_KEY = "ys-writer.workspace.v1";
 
@@ -240,11 +243,13 @@ export default function App() {
         </div>
 
         <section ref={editorSurfaceRef} className="editor-surface" aria-label="Markdown editor">
-          <MilkdownEditor
-            key={activeCard.id}
-            markdown={activeCard.markdown}
-            onChange={handleMarkdownChange}
-          />
+          <Suspense fallback={<div className="editor-loading">Loading editor...</div>}>
+            <MilkdownEditor
+              key={activeCard.id}
+              markdown={activeCard.markdown}
+              onChange={handleMarkdownChange}
+            />
+          </Suspense>
         </section>
       </main>
 
