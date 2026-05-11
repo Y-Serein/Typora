@@ -123,6 +123,26 @@ button {
   padding: 0 10px;
 }
 
+.toolbar button {
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease;
+}
+
+.toolbar button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.save-button.saved {
+  border-color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 16%, var(--paper));
+  color: var(--accent-cool);
+}
+
+.save-button.error {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--paper));
+  color: var(--accent);
+}
+
 button:disabled {
   color: var(--muted);
   cursor: not-allowed;
@@ -301,7 +321,14 @@ button:disabled {
 .outline-item {
   margin-bottom: 4px;
   color: var(--muted);
+  cursor: pointer;
   padding: 7px 8px;
+}
+
+.outline-item:hover,
+.outline-item:focus-visible {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .outline-item.level-2 {

@@ -4,12 +4,17 @@
 
 当前重点在修 Milkdown 编辑体验的小问题，不做 Whiteboard、拖拽、连线、云同步、插件、协作、AI、数据库、文件系统保存、导出。
 
-当前按 `AGENTS.md` 规则准备创建本地 Git commit；提交范围应包含源码、配置、文档和交接记录，不包含 `node_modules/`、`dist/`、`src-tauri/target/`。
+本轮刚修正式桌面版 P0 真实使用 bug，范围只在 `D_deliverables/ys-writer-desktop/`，没有改旧 HTML 原型 `D_deliverables/ys_typora_app/`。
 
 最近刚修：
 - 同一张 Card 内输入/换行不再重建 Milkdown，避免光标消失。
 - blockquote 空行按 Enter 退出引用块。
 - blockquote 样式高度压低。
+- Save 不再只更新时间戳；现在会把 cards 写入 localStorage，启动时优先恢复已保存 cards，读取失败或无数据才 fallback demo。
+- Save 按钮现在有点击反馈：成功后短暂显示 `Saved` 并变色，失败时显示 `Failed`。
+- Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 和顶部 document-strip 会跟随变化；没有一级标题时保留原标题。
+- 右侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
+- 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
 - WSLg/MESA/EGL warning 只记录，不作为 P0 阻塞。
 
 ## 已经试过的方案和结果（含失败的）
@@ -24,13 +29,16 @@
 - `MilkdownEditor` 最初把 `markdown` 放进 `useEditor` 依赖，导致输入后编辑器重建、换行光标消失；已改成挂载时读取初始 Markdown，变化只回写 state。
 - blockquote 退出逻辑没有用 DOM hack；当前用 Milkdown `$shortcut` + ProseMirror `lift`，只拦截 blockquote 内空 paragraph 的 Enter。
 - 最近验证：`npm run build` 通过，`cargo check` 通过，`tauri:dev` 能启动到桌面二进制运行阶段；`timeout` 退出码 124 是主动结束进程，不是构建失败。
+- 本轮验证：在 `D_deliverables/ys-writer-desktop/` 运行 `npm run build` 通过；在 `src-tauri/` 运行 `env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target /home/slam/.cargo/bin/cargo check` 通过。
+- Save 反馈补丁验证：`npm run build` 通过，`cargo check` 通过。
+- `npm run build` 仍有 Milkdown/Vite chunk 超过 500KB 警告，当前不影响 P0。
 
 ## 下一步计划（3-5条actionable)
 
-1. 运行桌面版并手测编辑器核心路径：普通段落、标题、列表、blockquote、代码块的 Enter/Backspace/Tab/Ctrl+Z。
-2. 重点验证 blockquote：输入 `> hello` 后 Enter 继续引用，再在空引用行 Enter 应退出到普通段落。
-3. 如果 blockquote 在嵌套引用或列表内引用场景异常，只针对该结构补最小 keymap 规则，不重构编辑器。
-4. 梳理 P0 编辑器快捷键缺口，优先处理会影响基础写作的 bug，不做导出/保存/白板。
+1. 运行桌面版手测：新建 Card，修改 `# 一级标题` 和正文，点击 Save，刷新或重启 dev 后确认内容恢复。
+2. 手测左侧 Cards 和顶部 document-strip 标题是否随第一行 `# xxx` 变化；删除一级标题后确认保留旧标题。
+3. 手测 Outline 点击是否能滚动到对应标题附近，尤其是同名标题和较长文档。
+4. 继续验证编辑器核心路径：普通段落、标题、列表、blockquote、代码块的 Enter/Backspace/Tab/Ctrl+Z。
 5. P0 稳定后，再考虑真实本地保存方案：先选文件系统还是嵌入式数据库，不要直接上同步或复杂数据层。
 
 ## 关键文件路径（相对路径，一行一个）
@@ -52,8 +60,12 @@ D_deliverables/ys_typora_app/
 ## 还没搞清楚的问题
 
 - blockquote 退出逻辑已通过构建验证，但还需要用户在真实 Tauri 窗口里手测确认交互是否完全符合 Typora 习惯。
+- localStorage 持久化已通过构建验证，但还没在真实 Tauri 窗口里手动刷新/重启验证。
+- 保存位置不是项目里的 Markdown 文件；当前写入 Tauri WebView 的 localStorage，key 是 `ys-writer.workspace.v1`。后续如果需要可见文件，需要单独实现文件系统保存。
+- 当前 dev 模式启动约 5s 偏慢，可能来自 Vite/Tauri/WebView 启动和 Milkdown 依赖加载；还没有做启动性能分析。
+- Outline 点击通过 DOM heading 顺序匹配跳转；同名标题理论上可用，但还没做自动化 UI 测试。
 - Milkdown 默认快捷键覆盖范围还没系统盘点，尤其是列表缩进、撤销/重做、代码块退出、中文输入法组合态。
-- 当前只做内存 state，Card 内容切换不丢，但刷新应用会丢；本地保存方案还没定。
+- 当前保存方案只做 localStorage，不是文件系统保存；跨设备、导出、数据库、云同步都未做。
 - WSL Windows 挂载路径的 npm/bin-links 和 Rust target 权限问题仍是环境风险；长期建议迁移到 WSL ext4 路径。
 - Vite build 有 Milkdown chunk 超过 500KB 警告，P0 不处理；后续如启动性能变差再拆包。
 - 还没有自动化 UI 测试；当前主要靠 `npm run build`、`cargo check`、`tauri:dev` 和手测。
