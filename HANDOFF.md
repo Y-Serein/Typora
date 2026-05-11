@@ -14,6 +14,7 @@
 - Save 按钮现在有点击反馈：成功后短暂显示 `Saved` 并变色，失败时显示 `Failed`。
 - 启动卡顿方向修正：`React.lazy` 拆 Milkdown 的方案已撤回，因为用户反馈变得更慢；当前改为移除 React dev `StrictMode`，避免 Milkdown 在开发模式被重复挂载初始化。
 - 布局调整：把 Save/New/Export/Undo/Redo/Ink 放到顶部应用菜单栏；移除右侧常驻 Outline/Info 栏；Outline 移到左侧 Cards 下方；移除 P0 之外的 Whiteboards 占位。
+- WSLg 启动慢修正：Linux 下创建 Tauri WebView 前设置 `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DISABLE_DMABUF_RENDERER`、`LIBGL_ALWAYS_SOFTWARE`，避开 WebKit/GL 在 WSLg 里探测 EGL/Zink 的卡顿路径。
 - Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 会跟随变化；没有一级标题时保留原标题。
 - 左侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
 - 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
@@ -37,6 +38,7 @@
 - 当前启动卡顿补丁验证：撤回懒加载并移除 `React.StrictMode` 后，`npm run build` 通过，`cargo check` 通过。
 - `npm run build` 重新出现 Milkdown/Vite chunk 超过 500KB 警告，当前为接受的回退结果。
 - 本轮布局补丁验证：`npm run build` 通过，`cargo check` 通过。
+- WSLg WebView 环境补丁验证：`npm run build` 通过，`cargo check` 通过；连续两次 `timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 不再输出 `libEGL / MESA / ZINK` 警告。第二次启动日志中 Vite ready 约 745ms，Rust dev profile 约 0.36s；`timeout` 退出码 124 是主动结束。
 
 ## 下一步计划（3-5条actionable)
 
@@ -67,7 +69,7 @@ D_deliverables/ys_typora_app/
 - blockquote 退出逻辑已通过构建验证，但还需要用户在真实 Tauri 窗口里手测确认交互是否完全符合 Typora 习惯。
 - localStorage 持久化已通过构建验证，但还没在真实 Tauri 窗口里手动刷新/重启验证。
 - 保存位置不是项目里的 Markdown 文件；当前写入 Tauri WebView 的 localStorage，key 是 `ys-writer.workspace.v1`。后续如果需要可见文件，需要单独实现文件系统保存。
-- 当前 dev 模式启动约 5s 偏慢；懒加载方向已证明体感不对并撤回。当前假设是 React dev `StrictMode` 导致 Milkdown 初始化重复，已移除但还没在真实 Tauri 窗口里验证体感。
+- 当前 dev 模式启动约 5s 偏慢；懒加载方向已证明体感不对并撤回。已移除 React dev `StrictMode`，并加了 WSLg WebView 软件渲染环境变量；日志层面 EGL/MESA/ZINK 报错已消失，但还需要用户确认真实窗口体感。
 - Outline 点击通过 DOM heading 顺序匹配跳转；同名标题理论上可用，但还没做自动化 UI 测试。
 - Milkdown 默认快捷键覆盖范围还没系统盘点，尤其是列表缩进、撤销/重做、代码块退出、中文输入法组合态。
 - 当前保存方案只做 localStorage，不是文件系统保存；跨设备、导出、数据库、云同步都未做。
