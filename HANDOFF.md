@@ -18,6 +18,7 @@
 - 启动慢再修正：默认启动进入轻量 Markdown textarea，不初始化 Milkdown；顶部菜单 `Rich Edit` 才动态加载 Milkdown。
 - Windows 打包准备：新增 `T_tools/build_windows.ps1`，用于在 Windows PowerShell 下构建 NSIS `.exe` 安装包。
 - Windows 打包脚本修正：脚本现在会输出 Node/npm/cargo 版本、检查 Tauri CLI 是否存在、检查外部命令退出码，并递归搜索 `src-tauri\target` 下的 `.exe/.msi`，避免构建失败后误报只找不到 bundle 目录。
+- Windows 打包图标修正：补充 `D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico`，解决 Windows `tauri-build` 报 `icons/icon.ico not found`。
 - Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 会跟随变化；没有一级标题时保留原标题。
 - 左侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
 - 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
@@ -45,6 +46,8 @@
 - 轻量启动补丁验证：`npm run build` 通过，主入口 JS 约 149KB，Milkdown 独立 chunk 约 363KB 且默认不加载；`cargo check` 通过；`timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 日志正常。
 - Windows 打包脚本验证：WSL 下运行 `npm run build` 通过，`cargo check` 通过；`T_tools/build_windows.ps1` 需在 Windows PowerShell 中执行才能生成 `.exe`。
 - Windows 打包脚本修正验证：WSL 下 `npm run build` 通过，`cargo check` 通过；Windows 上需重新运行脚本查看真实失败点或产物路径。
+- Windows icon 修正验证：`icon.ico` 是有效 Windows icon resource，包含 6 个尺寸；`cargo check` 通过。WSL 下 `npm run build` 当前失败，原因是共享 `node_modules` 缺少 Linux Rollup optional dependency `@rollup/rollup-linux-x64-gnu`，不是图标问题；为避免影响 Windows 打包环境，暂未在 WSL 重装依赖。
+- Windows 打包成功：`T_tools/build_windows.ps1` 已在 Windows PowerShell 生成 NSIS 安装包和 release exe，路径包括 `src-tauri\target\release\bundle\nsis\YS Writer_0.1.0_x64-setup.exe`、`src-tauri\target\release\ys-writer-desktop.exe`、`src-tauri\target\release\deps\ys_writer_desktop.exe`。
 
 ## 下一步计划（3-5条actionable)
 
@@ -68,6 +71,7 @@ D_deliverables/ys-writer-desktop/src/domain/model.ts
 D_deliverables/ys-writer-desktop/src-tauri/Cargo.toml
 D_deliverables/ys-writer-desktop/src-tauri/tauri.conf.json
 D_deliverables/ys-writer-desktop/src-tauri/capabilities/default.json
+D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico
 D_deliverables/ys_typora_app/
 T_tools/build_windows.ps1
 
@@ -76,7 +80,8 @@ T_tools/build_windows.ps1
 - blockquote 退出逻辑已通过构建验证，但还需要用户在真实 Tauri 窗口里手测确认交互是否完全符合 Typora 习惯。
 - localStorage 持久化已通过构建验证，但还没在真实 Tauri 窗口里手动刷新/重启验证。
 - 保存位置不是项目里的 Markdown 文件；当前写入 Tauri WebView 的 localStorage，key 是 `ys-writer.workspace.v1`。后续如果需要可见文件，需要单独实现文件系统保存。
-- 当前 WSLg dev 模式启动仍慢；已准备 Windows `.exe` 打包脚本，下一步应在 Windows PowerShell 中运行 `T_tools/build_windows.ps1`，用原生 WebView2 测试真实体感。
+- 当前 WSLg dev 模式启动仍慢；Windows `.exe` 已能打包，下一步用原生 WebView2 测试启动体感。
+- Windows/WSL 共用同一个 `node_modules` 会导致平台 optional dependency 缺失；Windows 打包优先以 Windows PowerShell 下 `npm install` 后的依赖为准，不建议同时在 WSL 和 Windows 来回重装同一个 `node_modules`。
 - Outline 点击通过 DOM heading 顺序匹配跳转；同名标题理论上可用，但还没做自动化 UI 测试。
 - Milkdown 默认快捷键覆盖范围还没系统盘点，尤其是列表缩进、撤销/重做、代码块退出、中文输入法组合态。
 - 当前保存方案只做 localStorage，不是文件系统保存；跨设备、导出、数据库、云同步都未做。
