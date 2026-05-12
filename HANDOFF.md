@@ -17,6 +17,11 @@
 - WSLg 启动慢修正：Linux 下创建 Tauri WebView 前设置 `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DISABLE_DMABUF_RENDERER`、`LIBGL_ALWAYS_SOFTWARE`，避开 WebKit/GL 在 WSLg 里探测 EGL/Zink 的卡顿路径。
 - 启动慢再修正：默认启动进入轻量 Markdown textarea，不初始化 Milkdown；顶部菜单 `Rich Edit` 才动态加载 Milkdown。
 - Windows 渲染修正：生产包默认进入 `Rich Edit`，确保 Markdown 会渲染成标题/列表等；开发模式仍默认 `Plain Edit`，保留 WSLg 下快速启动路径。
+- 产品化收敛：去掉顶部 New/Save/Export/Undo/Redo 那排，只保留编辑模式、状态和 Settings；工作区改为自动保存，`Ctrl+S` 仍可手动保存。
+- 布局 bug 修复：编辑内容减少后 editor 区域仍填满剩余高度，不再露出底部 shell 背景网格。
+- 左侧目录优化：默认宽度改窄到 220px，并支持拖拽调整宽度，设置会写入 localStorage。
+- 设置入口：Settings 面板已包含主题风格、保存位置说明和默认快捷键列表；主题包含 Daily、Eye Care、Dark。
+- Windows release 体验修正：`src-tauri/src/main.rs` 设置 `windows_subsystem = "windows"`，打包版运行时不再弹命令行窗口；debug/dev 仍保留控制台。
 - Windows 打包准备：新增 `T_tools/build_windows.ps1`，用于在 Windows PowerShell 下构建 NSIS `.exe` 安装包。
 - Windows 打包脚本修正：脚本现在会输出 Node/npm/cargo 版本、检查 Tauri CLI 是否存在、检查外部命令退出码，并递归搜索 `src-tauri\target` 下的 `.exe/.msi`，避免构建失败后误报只找不到 bundle 目录。
 - Windows 打包图标修正：补充 `D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico`，解决 Windows `tauri-build` 报 `icons/icon.ico not found`。
@@ -50,14 +55,16 @@
 - Windows icon 修正验证：`icon.ico` 是有效 Windows icon resource，包含 6 个尺寸；`cargo check` 通过。WSL 下 `npm run build` 当前失败，原因是共享 `node_modules` 缺少 Linux Rollup optional dependency `@rollup/rollup-linux-x64-gnu`，不是图标问题；为避免影响 Windows 打包环境，暂未在 WSL 重装依赖。
 - Windows 打包成功：`T_tools/build_windows.ps1` 已在 Windows PowerShell 生成 NSIS 安装包和 release exe，路径包括 `src-tauri\target\release\bundle\nsis\YS Writer_0.1.0_x64-setup.exe`、`src-tauri\target\release\ys-writer-desktop.exe`、`src-tauri\target\release\deps\ys_writer_desktop.exe`。
 - Windows 渲染修正验证：`cargo check` 通过；需要在 Windows PowerShell 重新运行 `T_tools/build_windows.ps1 -SkipInstall` 验证生产包默认 Rich Edit 渲染。
+- 本轮产品化补丁验证：`node node_modules/typescript/lib/tsc.js --noEmit` 通过；`cargo check` 通过。WSL 下未跑完整 `npm run build`，因为共享 `node_modules` 当前缺 Linux Rollup optional dependency。
+- Windows 隐藏控制台验证：`cargo check` 通过；需要在 Windows PowerShell 重新打包并运行 release exe 验证无命令行窗口。
 
 ## 下一步计划（3-5条actionable)
 
 1. 运行桌面版手测：新建 Card，修改 `# 一级标题` 和正文，点击 Save，刷新或重启 dev 后确认内容恢复。
-2. 手测顶部菜单栏里的 New/Save/Ink 是否符合桌面应用习惯，Save 是否仍有反馈。
-3. 手测左侧 Cards 标题是否随第一行 `# xxx` 变化；删除一级标题后确认保留旧标题。
-4. 手测左侧 Outline 点击是否能滚动到对应标题附近，尤其是同名标题和较长文档。
-5. 继续验证编辑器核心路径：普通段落、标题、列表、blockquote、代码块的 Enter/Backspace/Tab/Ctrl+Z。
+2. 手测删除多行后编辑区是否仍填满窗口，不能再露出底部背景。
+3. 手测左侧目录拖拽调整宽度、重启后是否保持。
+4. 手测 Settings 中主题切换、快捷键说明、关闭行为。
+5. 重新 Windows 打包并手测生产包：默认 Rich Edit 渲染、自动保存、Ctrl+S/Ctrl+N/Ctrl+,、Ctrl+Z/X/C/V。
 
 ## 关键文件路径（相对路径，一行一个）
 
