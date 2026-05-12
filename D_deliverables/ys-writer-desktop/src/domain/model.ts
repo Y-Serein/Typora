@@ -7,6 +7,9 @@ export type Card = {
   tagIds: ID[];
   createdAt: string;
   updatedAt: string;
+  filePath?: string;
+  fileName?: string;
+  fileExt?: string;
 };
 
 export type Whiteboard = {

@@ -1,99 +1,86 @@
 ## 当前在做什么
 
-正式桌面版 P0 最小闭环已经跑通：`D_deliverables/ys-writer-desktop/` 是 Tauri 2 + React + TypeScript + Milkdown 工程，旧 HTML 原型保留不动。
+正式桌面版 P0 继续收敛，范围限定在 `D_deliverables/ys-writer-desktop/`，旧 HTML 原型 `D_deliverables/ys_typora_app/` 未修改。
 
-当前重点在修 Milkdown 编辑体验的小问题，不做 Whiteboard、拖拽、连线、云同步、插件、协作、AI、数据库、文件系统保存、导出。
+本轮只做了两个目标：
+- 工作区目录模式：打开一个真实文件夹作为 workspace，左侧显示真实目录树，只展示文件夹和 `.md/.markdown/.txt`；点击文件后在当前编辑器打开，Ctrl+S 写回真实文件，Save As 保存纯文本 Markdown。
+- Rich Edit 的 Markdown 嵌套退出规则：用 Milkdown/ProseMirror command 处理空引用、空列表项、嵌套列表退出，不使用 DOM hack。
 
-本轮刚修正式桌面版 P0 真实使用 bug，范围只在 `D_deliverables/ys-writer-desktop/`，没有改旧 HTML 原型 `D_deliverables/ys_typora_app/`。
+当前实现状态：
+- 文件菜单已有“打开工作区”，通过 Tauri dialog 选择目录。
+- `workspaceRoot`、`lastOpenedFile`、UI 状态写入 localStorage 的 `ys-writer.settings.v1`。
+- workspaceRoot 模式下不再把真实文件内容长期写入 localStorage 的 cards；进入工作区后会清理 `ys-writer.workspace.v1` 草稿 cards。
+- Rust command 支持读取目录树、读写 `.md/.markdown/.txt`、新建文件/文件夹、重命名、删除。
+- 删除前确认在前端 `window.confirm`；删除调用 Rust `remove_file/remove_dir_all`，是真实文件系统删除。
+- Milkdown Enter 规则已收紧：空 blockquote 先 `lift` 出引用；空 list item 用 `liftListItem` 只退一层；非空 list item 内的空段落用 `splitListItem` 进入下一项。
 
-最近刚修：
-- 同一张 Card 内输入/换行不再重建 Milkdown，避免光标消失。
-- blockquote 空行按 Enter 退出引用块。
-- blockquote 样式高度压低。
-- Save 不再只更新时间戳；现在会把 cards 写入 localStorage，启动时优先恢复已保存 cards，读取失败或无数据才 fallback demo。
-- Save 按钮现在有点击反馈：成功后短暂显示 `Saved` 并变色，失败时显示 `Failed`。
-- 启动卡顿方向修正：`React.lazy` 拆 Milkdown 的方案已撤回，因为用户反馈变得更慢；当前改为移除 React dev `StrictMode`，避免 Milkdown 在开发模式被重复挂载初始化。
-- 布局调整：把 Save/New/Export/Undo/Redo/Ink 放到顶部应用菜单栏；移除右侧常驻 Outline/Info 栏；Outline 移到左侧 Cards 下方；移除 P0 之外的 Whiteboards 占位。
-- WSLg 启动慢修正：Linux 下创建 Tauri WebView 前设置 `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DISABLE_DMABUF_RENDERER`、`LIBGL_ALWAYS_SOFTWARE`，避开 WebKit/GL 在 WSLg 里探测 EGL/Zink 的卡顿路径。
-- 启动慢再修正：默认启动进入轻量 Markdown textarea，不初始化 Milkdown；顶部菜单 `Rich Edit` 才动态加载 Milkdown。
-- Windows 渲染修正：生产包默认进入 `Rich Edit`，确保 Markdown 会渲染成标题/列表等；开发模式仍默认 `Plain Edit`，保留 WSLg 下快速启动路径。
-- 产品化收敛：去掉顶部 New/Save/Export/Undo/Redo 那排，只保留编辑模式、状态和 Settings；工作区改为自动保存，`Ctrl+S` 仍可手动保存。
-- 布局 bug 修复：编辑内容减少后 editor 区域仍填满剩余高度，不再露出底部 shell 背景网格。
-- 左侧目录优化：默认宽度改窄到 220px，并支持拖拽调整宽度，设置会写入 localStorage。
-- 设置入口：Settings 面板已包含主题风格、保存位置说明和默认快捷键列表；主题包含 Daily、Eye Care、Dark。
-- Windows release 体验修正：`src-tauri/src/main.rs` 设置 `windows_subsystem = "windows"`，打包版运行时不再弹命令行窗口；debug/dev 仍保留控制台。
-- Windows 打包准备：新增 `T_tools/build_windows.ps1`，用于在 Windows PowerShell 下构建 NSIS `.exe` 安装包。
-- Windows 打包脚本修正：脚本现在会输出 Node/npm/cargo 版本、检查 Tauri CLI 是否存在、检查外部命令退出码，并递归搜索 `src-tauri\target` 下的 `.exe/.msi`，避免构建失败后误报只找不到 bundle 目录。
-- Windows 打包图标修正：补充 `D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico`，解决 Windows `tauri-build` 报 `icons/icon.ico not found`。
-- Markdown 第一行存在一级标题 `# xxx` 时，会同步当前 card.title，左侧 Cards 会跟随变化；没有一级标题时保留原标题。
-- 左侧 Outline 现在点击会滚动到 Milkdown 中对应的 h1/h2/h3，并补了 hover/focus 可点击反馈。
-- 左侧 Cards 的 `+` 已启用，会创建默认“未命名文档”并自动选中；Save 后可持久化。
-- WSLg/MESA/EGL warning 只记录，不作为 P0 阻塞。
+用户下一步要生成 Windows `.exe`，正确入口是仓库根目录下的 `T_tools/build_windows.ps1`，不是在 WSL 里跑 `cargo check`。
+
+Windows PowerShell 编译命令（首选，已在 PowerShell 里时直接运行）：
+
+```powershell
+cd C:\path\to\Typora
+.\T_tools\build_windows.ps1
+```
+
+如果 Windows 侧已经安装过依赖、只想跳过 npm 安装：
+
+```powershell
+cd C:\path\to\Typora
+.\T_tools\build_windows.ps1 -SkipInstall
+```
+
+只有当 PowerShell 报脚本执行策略拦截时，再用备用写法：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\T_tools\build_windows.ps1 -SkipInstall
+```
+
+预期产物位置：
+
+```text
+D_deliverables\ys-writer-desktop\src-tauri\target\release\bundle\nsis\YS Writer_0.1.0_x64-setup.exe
+D_deliverables\ys-writer-desktop\src-tauri\target\release\ys-writer-desktop.exe
+```
 
 ## 已经试过的方案和结果（含失败的）
 
-- `npm install` 在 WSL Windows 挂载路径上出现 bin-links/chmod 权限问题；当前采用 `npm install --no-bin-links`，并在 `package.json` scripts 里直接调用 `node node_modules/...` 的 JS 入口。
-- 默认 Rust target 在 Windows 挂载路径下会遇到 permission manifest 写入问题；当前使用 `CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target` 规避。
-- `cargo check` 曾因缺少 `dbus-1.pc` 失败；解决方式是安装 `libdbus-1-dev pkg-config`。
-- 安装 dbus 后又遇到 `glib-2.0`、`gio-2.0`、`gobject-2.0` 缺失；需要补齐 Tauri Linux 官方 GTK/WebKitGTK 依赖。
-- Tauri 窗口已能启动；启动日志里仍有 WSLg/MESA/EGL warning，暂不处理系统图形配置。
-- 曾在仓库根目录运行 `npm run tauri:dev`，失败原因是根目录没有 `package.json`；正确目录是 `D_deliverables/ys-writer-desktop/`。
-- 曾遇到 `Port 1420 is already in use`；原因是旧 dev server 占用端口，需结束旧进程后重试。
-- `MilkdownEditor` 最初把 `markdown` 放进 `useEditor` 依赖，导致输入后编辑器重建、换行光标消失；已改成挂载时读取初始 Markdown，变化只回写 state。
-- blockquote 退出逻辑没有用 DOM hack；当前用 Milkdown `$shortcut` + ProseMirror `lift`，只拦截 blockquote 内空 paragraph 的 Enter。
-- 最近验证：`npm run build` 通过，`cargo check` 通过，`tauri:dev` 能启动到桌面二进制运行阶段；`timeout` 退出码 124 是主动结束进程，不是构建失败。
-- 本轮验证：在 `D_deliverables/ys-writer-desktop/` 运行 `npm run build` 通过；在 `src-tauri/` 运行 `env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target /home/slam/.cargo/bin/cargo check` 通过。
-- Save 反馈补丁验证：`npm run build` 通过，`cargo check` 通过。
-- 启动白屏错误方向：`React.lazy` 曾让主入口 JS 从约 512KB 降到约 150KB，但用户反馈实际更慢，已撤回。
-- 当前启动卡顿补丁验证：撤回懒加载并移除 `React.StrictMode` 后，`npm run build` 通过，`cargo check` 通过。
-- `npm run build` 重新出现 Milkdown/Vite chunk 超过 500KB 警告，当前为接受的回退结果。
-- 本轮布局补丁验证：`npm run build` 通过，`cargo check` 通过。
-- WSLg WebView 环境补丁验证：`npm run build` 通过，`cargo check` 通过；连续两次 `timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 不再输出 `libEGL / MESA / ZINK` 警告。第二次启动日志中 Vite ready 约 745ms，Rust dev profile 约 0.36s；`timeout` 退出码 124 是主动结束。
-- 轻量启动补丁验证：`npm run build` 通过，主入口 JS 约 149KB，Milkdown 独立 chunk 约 363KB 且默认不加载；`cargo check` 通过；`timeout 20s env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target npm run tauri:dev` 日志正常。
-- Windows 打包脚本验证：WSL 下运行 `npm run build` 通过，`cargo check` 通过；`T_tools/build_windows.ps1` 需在 Windows PowerShell 中执行才能生成 `.exe`。
-- Windows 打包脚本修正验证：WSL 下 `npm run build` 通过，`cargo check` 通过；Windows 上需重新运行脚本查看真实失败点或产物路径。
-- Windows icon 修正验证：`icon.ico` 是有效 Windows icon resource，包含 6 个尺寸；`cargo check` 通过。WSL 下 `npm run build` 当前失败，原因是共享 `node_modules` 缺少 Linux Rollup optional dependency `@rollup/rollup-linux-x64-gnu`，不是图标问题；为避免影响 Windows 打包环境，暂未在 WSL 重装依赖。
-- Windows 打包成功：`T_tools/build_windows.ps1` 已在 Windows PowerShell 生成 NSIS 安装包和 release exe，路径包括 `src-tauri\target\release\bundle\nsis\YS Writer_0.1.0_x64-setup.exe`、`src-tauri\target\release\ys-writer-desktop.exe`、`src-tauri\target\release\deps\ys_writer_desktop.exe`。
-- Windows 渲染修正验证：`cargo check` 通过；需要在 Windows PowerShell 重新运行 `T_tools/build_windows.ps1 -SkipInstall` 验证生产包默认 Rich Edit 渲染。
-- 本轮产品化补丁验证：`node node_modules/typescript/lib/tsc.js --noEmit` 通过；`cargo check` 通过。WSL 下未跑完整 `npm run build`，因为共享 `node_modules` 当前缺 Linux Rollup optional dependency。
-- Windows 隐藏控制台验证：`cargo check` 通过；需要在 Windows PowerShell 重新打包并运行 release exe 验证无命令行窗口。
+- 读取了当前 `HANDOFF.md` 和 `D_deliverables/ys-writer-desktop/` 代码，确认旧 HTML 原型未触碰。
+- `src/App.tsx` 原本已有目录树雏形，但还保留 recentFiles 持久化和 workspace 模式 autosave cards 的风险；本轮已移除 recentFiles 持久化，并在 workspaceRoot 模式清理草稿 cards。
+- `src-tauri/src/lib.rs` 原本新建/重命名返回 `()`；本轮改为返回真实路径，前端新建文件/重命名当前文件后按真实路径打开。
+- `rename_workspace_entry` 原本没有显式拒绝目标已存在；本轮已加 `target.exists()` 检查。
+- `src/components/MilkdownEditor.tsx` 原本已用 `$shortcut`，本轮把 Enter 处理收紧为：blockquote 优先 lift，只有当前段落直接处在 list_item 时才处理列表退出/拆分。
+- 已运行 `node node_modules/typescript/lib/tsc.js --noEmit`，结果通过。
+- 已运行 `env CARGO_TARGET_DIR=/tmp/ys-writer-tauri-target /home/slam/.cargo/bin/cargo check`，结果通过。
+- 未启动 Tauri GUI，未做系统文件对话框和 Rich Edit 键盘交互手测；用户说这轮由用户编译。
+- 以前 Windows 打包脚本已经成功生成过 NSIS 安装包和 release exe；本轮代码变更后需要用户在 Windows PowerShell 重新运行 `T_tools/build_windows.ps1`。
 
 ## 下一步计划（3-5条actionable)
 
-1. 运行桌面版手测：新建 Card，修改 `# 一级标题` 和正文，点击 Save，刷新或重启 dev 后确认内容恢复。
-2. 手测删除多行后编辑区是否仍填满窗口，不能再露出底部背景。
-3. 手测左侧目录拖拽调整宽度、重启后是否保持。
-4. 手测 Settings 中主题切换、快捷键说明、关闭行为。
-5. 重新 Windows 打包并手测生产包：默认 Rich Edit 渲染、自动保存、Ctrl+S/Ctrl+N/Ctrl+,、Ctrl+Z/X/C/V。
+1. 在 Windows PowerShell 进入 Typora 仓库根目录，运行 `.\T_tools\build_windows.ps1 -SkipInstall` 生成 `.exe`；如果缺依赖则去掉 `-SkipInstall` 重新跑。
+2. 如果脚本提示 `node_modules exists; skipping npm ci` 且依赖异常，删除 `D_deliverables\ys-writer-desktop\node_modules` 后重新运行脚本；不要在 WSL 和 Windows 之间来回重装同一个 `node_modules`。
+3. 安装或直接运行生成的 `ys-writer-desktop.exe`，手测“文件 -> 打开工作区”，确认左侧显示真实目录树且只显示文件夹、`.md/.markdown/.txt`。
+4. 手测点击 `.md` 和 `.txt`、Ctrl+S 写回、新建/重命名/删除文件和文件夹、重启恢复 workspaceRoot/lastOpenedFile。
+5. Rich Edit 手测普通 `>` 空行、列表里的 `>` 空行、空 `-`、空 `1.`、嵌套列表空行 Enter，确认退出层级符合预期。
 
 ## 关键文件路径（相对路径，一行一个）
 
-C_context/desktop_landing_plan.md
-C_context/heptabase_like_data_model.md
-C_context/logs.txt
-D_deliverables/ys-writer-desktop/package.json
+T_tools/build_windows.ps1
 D_deliverables/ys-writer-desktop/src/App.tsx
 D_deliverables/ys-writer-desktop/src/components/MilkdownEditor.tsx
-D_deliverables/ys-writer-desktop/src/styles.css
-D_deliverables/ys-writer-desktop/src/data/demoWorkspace.ts
-D_deliverables/ys-writer-desktop/src/domain/model.ts
+D_deliverables/ys-writer-desktop/src-tauri/src/lib.rs
 D_deliverables/ys-writer-desktop/src-tauri/Cargo.toml
-D_deliverables/ys-writer-desktop/src-tauri/tauri.conf.json
 D_deliverables/ys-writer-desktop/src-tauri/capabilities/default.json
-D_deliverables/ys-writer-desktop/src-tauri/icons/icon.ico
-D_deliverables/ys_typora_app/
-T_tools/build_windows.ps1
+D_deliverables/ys-writer-desktop/src/domain/model.ts
+D_deliverables/ys-writer-desktop/src/styles.css
+D_deliverables/ys-writer-desktop/package.json
+HANDOFF.md
 
 ## 还没搞清楚的问题
 
-- blockquote 退出逻辑已通过构建验证，但还需要用户在真实 Tauri 窗口里手测确认交互是否完全符合 Typora 习惯。
-- localStorage 持久化已通过构建验证，但还没在真实 Tauri 窗口里手动刷新/重启验证。
-- 保存位置不是项目里的 Markdown 文件；当前写入 Tauri WebView 的 localStorage，key 是 `ys-writer.workspace.v1`。后续如果需要可见文件，需要单独实现文件系统保存。
-- 当前 WSLg dev 模式启动仍慢；Windows `.exe` 已能打包，下一步用原生 WebView2 测试启动体感。
-- Windows/WSL 共用同一个 `node_modules` 会导致平台 optional dependency 缺失；Windows 打包优先以 Windows PowerShell 下 `npm install` 后的依赖为准，不建议同时在 WSL 和 Windows 来回重装同一个 `node_modules`。
-- Outline 点击通过 DOM heading 顺序匹配跳转；同名标题理论上可用，但还没做自动化 UI 测试。
-- Milkdown 默认快捷键覆盖范围还没系统盘点，尤其是列表缩进、撤销/重做、代码块退出、中文输入法组合态。
-- 当前保存方案只做 localStorage，不是文件系统保存；跨设备、导出、数据库、云同步都未做。
-- WSL Windows 挂载路径的 npm/bin-links 和 Rust target 权限问题仍是环境风险；长期建议迁移到 WSL ext4 路径。
-- Vite build 有 Milkdown chunk 超过 500KB 警告，P0 不处理；后续如启动性能变差再拆包。
-- 还没有自动化 UI 测试；当前主要靠 `npm run build`、`cargo check`、`tauri:dev` 和手测。
+- 本轮没有重新跑 Windows 打包；`.exe` 需要用户在 Windows PowerShell 运行 `T_tools/build_windows.ps1` 后确认。
+- 系统文件夹选择、文件选择、Save As 对话框必须在真实 Tauri 窗口或 Windows release 包里手测；命令行无法验证对话框交互。
+- Rich Edit 的嵌套 Enter 规则已通过类型检查，但还没有自动化编辑器交互测试，仍需 GUI 手测确认 ProseMirror 实际文档变换符合预期。
+- 当前菜单里段落/格式/导出/查找/关于仍是 disabled 的历史占位；本轮按要求没有继续扩展灰色菜单。
+- 工作区目录树当前全部展开，没有折叠状态；本轮需求未要求折叠，所以未做。
+- 工作区删除文件夹使用真实 `remove_dir_all`，确认框是唯一前端保护；误删无法从应用内恢复。

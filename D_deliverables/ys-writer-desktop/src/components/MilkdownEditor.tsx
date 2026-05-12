@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 import { defaultValueCtx, Editor, rootCtx } from "@milkdown/kit/core";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
+import { history } from "@milkdown/kit/plugin/history";
 import { commonmark } from "@milkdown/kit/preset/commonmark";
 import { lift } from "@milkdown/kit/prose/commands";
+import { liftListItem, splitListItem } from "@milkdown/kit/prose/schema-list";
 import type { Command } from "@milkdown/kit/prose/state";
 import { $shortcut } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
@@ -12,7 +14,7 @@ type MilkdownEditorProps = {
   onChange: (markdown: string) => void;
 };
 
-const exitEmptyBlockquote: Command = (state, dispatch) => {
+const handleNestedEnter: Command = (state, dispatch) => {
   const { selection } = state;
   if (!selection.empty) return false;
 
@@ -20,18 +22,29 @@ const exitEmptyBlockquote: Command = (state, dispatch) => {
   const currentNode = $from.parent;
   const parentNode = $from.depth > 0 ? $from.node($from.depth - 1) : null;
   const isEmptyParagraph = currentNode.type.name === "paragraph" && currentNode.content.size === 0;
-  const isDirectlyInBlockquote = parentNode?.type.name === "blockquote";
 
-  if (!isEmptyParagraph || !isDirectlyInBlockquote) return false;
+  if (!isEmptyParagraph) return false;
 
-  return lift(state, dispatch);
+  if (parentNode?.type.name === "blockquote") return lift(state, dispatch);
+
+  const listItemType = state.schema.nodes.list_item;
+  if (!listItemType) return false;
+  if (parentNode?.type !== listItemType) return false;
+
+  const listItemNode = parentNode;
+  const isOnlyEmptyParagraph = listItemNode.childCount === 1
+    && listItemNode.child(0).type.name === "paragraph"
+    && listItemNode.child(0).content.size === 0;
+
+  if (isOnlyEmptyParagraph) return liftListItem(listItemType)(state, dispatch);
+  return splitListItem(listItemType)(state, dispatch);
 };
 
-const blockquoteExitShortcut = $shortcut(() => ({
+const nestedEnterShortcut = $shortcut(() => ({
   Enter: {
     key: "Enter",
-    onRun: () => exitEmptyBlockquote,
-    priority: 100,
+    onRun: () => handleNestedEnter,
+    priority: 1000,
   },
 }));
 
@@ -53,7 +66,8 @@ function EditorSurface({ markdown, onChange }: MilkdownEditorProps) {
         });
       })
       .use(commonmark)
-      .use(blockquoteExitShortcut)
+      .use(history)
+      .use(nestedEnterShortcut)
       .use(listener);
   }, []);
 

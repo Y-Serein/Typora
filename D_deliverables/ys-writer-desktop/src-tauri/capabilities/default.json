@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default desktop capabilities for YS Writer.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
