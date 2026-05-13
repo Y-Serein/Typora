@@ -25,6 +25,18 @@ struct WorkspaceTreeEntry {
     children: Vec<WorkspaceTreeEntry>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceDirectory {
+    name: String,
+    path: String,
+    relative_path: String,
+    children: Vec<WorkspaceTreeEntry>,
+    has_more: bool,
+    truncated: bool,
+    error: Option<String>,
+}
+
 #[tauri::command]
 fn read_markdown_file(path: String) -> Result<MarkdownFile, String> {
     ensure_supported_text_path(&path)?;
@@ -63,18 +75,6 @@ fn write_markdown_file(path: String, content: String) -> Result<MarkdownFile, St
         file_ext: normalized_extension(file_path).unwrap_or_else(|| "md".to_string()),
         content,
     })
-}
-
-#[tauri::command]
-fn read_workspace_tree(root: String) -> Result<WorkspaceTreeEntry, String> {
-    let root_path = fs::canonicalize(&root)
-        .map_err(|error| format!("Failed to read workspace root: {error}"))?;
-
-    if !root_path.is_dir() {
-        return Err("Workspace root is not a directory.".to_string());
-    }
-
-    build_workspace_tree(&root_path, &root_path)
 }
 
 #[tauri::command]
@@ -150,65 +150,78 @@ fn delete_workspace_entry(root: String, relative_path: String) -> Result<(), Str
     }
 }
 
-fn ensure_supported_text_path(path: &str) -> Result<(), String> {
-    let file_path = Path::new(path);
-    let Some(extension) = normalized_extension(file_path) else {
-        return Err("Only .md, .markdown and .txt files are supported.".to_string());
-    };
+#[tauri::command]
+fn read_workspace_directory(root: String, relative_path: String, limit: Option<usize>) -> Result<WorkspaceDirectory, String> {
+    let limit = limit.unwrap_or(300).clamp(1, 1000);
+    let root_path = fs::canonicalize(&root)
+        .map_err(|error| format!("Failed to read workspace root: {error}"))?;
 
-    match extension.as_str() {
-        "md" | "markdown" | "txt" => Ok(()),
-        _ => Err("Only .md, .markdown and .txt files are supported.".to_string()),
+    if !root_path.is_dir() {
+        return Err("Workspace root is not a directory.".to_string());
     }
-}
 
-fn build_workspace_tree(root: &Path, path: &Path) -> Result<WorkspaceTreeEntry, String> {
-    let name = if path == root {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Workspace")
-            .to_string()
-    } else {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("")
-            .to_string()
-    };
-    let relative_path = path
-        .strip_prefix(root)
+    let directory = resolve_workspace_path(&root, &relative_path, true)?;
+    if !directory.is_dir() {
+        return Err("Workspace path is not a directory.".to_string());
+    }
+
+    let relative_path = directory
+        .strip_prefix(&root_path)
         .ok()
         .map(to_slash_path)
         .unwrap_or_default();
     let mut children = Vec::new();
+    let mut truncated = false;
+    let entries = fs::read_dir(&directory)
+        .map_err(|error| format!("Failed to read directory: {error}"))?;
 
-    if path.is_dir() {
-        let entries = fs::read_dir(path)
-            .map_err(|error| format!("Failed to read directory: {error}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("Failed to read directory entry: {error}"))?;
+        let entry_path = entry.path();
+        let file_type = entry.file_type()
+            .map_err(|error| format!("Failed to read directory entry type: {error}"))?;
+        let name = entry_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
 
-        for entry in entries {
-            let entry = entry.map_err(|error| format!("Failed to read directory entry: {error}"))?;
-            let entry_path = entry.path();
-
-            if entry_path.is_dir() {
-                children.push(build_workspace_tree(root, &entry_path)?);
-            } else if is_supported_text_path(&entry_path) {
-                children.push(WorkspaceTreeEntry {
-                    name: entry_path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    path: entry_path.to_string_lossy().to_string(),
-                    relative_path: entry_path
-                        .strip_prefix(root)
-                        .ok()
-                        .map(to_slash_path)
-                        .unwrap_or_default(),
-                    kind: "file".to_string(),
-                    file_ext: normalized_extension(&entry_path),
-                    children: Vec::new(),
-                });
+        if file_type.is_dir() {
+            if should_skip_directory(&name) {
+                continue;
             }
+
+            children.push(WorkspaceTreeEntry {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                relative_path: entry_path
+                    .strip_prefix(&root_path)
+                    .ok()
+                    .map(to_slash_path)
+                    .unwrap_or_default(),
+                kind: "directory".to_string(),
+                file_ext: None,
+                children: Vec::new(),
+            });
+        } else if file_type.is_file() && is_supported_text_path(&entry_path) {
+            children.push(WorkspaceTreeEntry {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                relative_path: entry_path
+                    .strip_prefix(&root_path)
+                    .ok()
+                    .map(to_slash_path)
+                    .unwrap_or_default(),
+                kind: "file".to_string(),
+                file_ext: normalized_extension(&entry_path),
+                children: Vec::new(),
+            });
+        }
+
+        if children.len() > limit {
+            children.truncate(limit);
+            truncated = true;
+            break;
         }
     }
 
@@ -220,14 +233,31 @@ fn build_workspace_tree(root: &Path, path: &Path) -> Result<WorkspaceTreeEntry, 
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
 
-    Ok(WorkspaceTreeEntry {
-        name,
-        path: path.to_string_lossy().to_string(),
+    Ok(WorkspaceDirectory {
+        name: directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Workspace")
+            .to_string(),
+        path: directory.to_string_lossy().to_string(),
         relative_path,
-        kind: "directory".to_string(),
-        file_ext: None,
         children,
+        has_more: truncated,
+        truncated,
+        error: None,
     })
+}
+
+fn ensure_supported_text_path(path: &str) -> Result<(), String> {
+    let file_path = Path::new(path);
+    let Some(extension) = normalized_extension(file_path) else {
+        return Err("Only .md, .markdown and .txt files are supported.".to_string());
+    };
+
+    match extension.as_str() {
+        "md" | "markdown" | "txt" => Ok(()),
+        _ => Err("Only .md, .markdown and .txt files are supported.".to_string()),
+    }
 }
 
 fn resolve_workspace_path(root: &str, relative_path: &str, must_exist: bool) -> Result<PathBuf, String> {
@@ -278,6 +308,27 @@ fn is_supported_text_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn should_skip_directory(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+
+    matches!(
+        name,
+        "node_modules"
+            | "target"
+            | "build"
+            | "dist"
+            | "out"
+            | "install"
+            | "images"
+            | "logs"
+            | "tmp"
+            | "__pycache__"
+            | "venv"
+    )
+}
+
 fn to_slash_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -297,7 +348,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_markdown_file,
             write_markdown_file,
-            read_workspace_tree,
+            read_workspace_directory,
             create_workspace_entry,
             rename_workspace_entry,
             delete_workspace_entry,

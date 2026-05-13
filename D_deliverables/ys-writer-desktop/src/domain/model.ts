@@ -12,6 +12,28 @@ export type Card = {
   fileExt?: string;
 };
 
+export type EditorCommandAction =
+  | "paragraph"
+  | "heading1"
+  | "heading2"
+  | "heading3"
+  | "blockquote"
+  | "bulletList"
+  | "orderedList"
+  | "codeBlock"
+  | "bold"
+  | "italic"
+  | "inlineCode"
+  | "strike"
+  | "link"
+  | "selectAllSmart";
+
+export type EditorCommandSignal = {
+  id: number;
+  action: EditorCommandAction;
+  payload?: string;
+};
+
 export type Whiteboard = {
   id: ID;
   title: string;

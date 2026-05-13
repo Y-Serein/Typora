@@ -1,0 +1,34 @@
+# Local context artifacts
+C_context/images/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+target/
+**/target/
+build/
+**/build/
+out/
+**/out/
+install/
+**/install/
+
+# Caches and temporary files
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.cache/
+tmp/
+**/tmp/
+*.tmp
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
