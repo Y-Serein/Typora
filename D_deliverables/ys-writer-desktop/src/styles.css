@@ -44,7 +44,7 @@ button {
 .desktop-shell {
   position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 220px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr) 280px;
   grid-template-rows: var(--chrome-height) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
@@ -53,10 +53,30 @@ button {
 }
 
 .desktop-shell[data-sidebar="hidden"] {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 280px;
 }
 
 .desktop-shell[data-sidebar="hidden"] .editor-column {
+  grid-column: 1;
+}
+
+.desktop-shell[data-sidebar="hidden"] .right-rail {
+  grid-column: 2;
+}
+
+.desktop-shell[data-right-panel="hidden"] {
+  grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr);
+}
+
+.desktop-shell[data-sidebar="hidden"][data-right-panel="hidden"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.desktop-shell[data-right-panel="hidden"] .editor-column {
+  grid-column: 2;
+}
+
+.desktop-shell[data-sidebar="hidden"][data-right-panel="hidden"] .editor-column {
   grid-column: 1;
 }
 
@@ -336,7 +356,8 @@ button:disabled {
 }
 
 .left-rail,
-.editor-column {
+.editor-column,
+.right-rail {
   min-height: 0;
 }
 
@@ -580,6 +601,25 @@ button:disabled {
   overflow: hidden;
 }
 
+.right-rail {
+  grid-column: 3;
+  grid-row: 2;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  font-size: calc(13px * var(--ui-scale, 1));
+}
+
+.knowledge-panel {
+  min-width: 0;
+}
+
+.panel-note {
+  border-bottom: 1px solid var(--line);
+}
+
 .editor-surface {
   flex: 1;
   min-height: 0;
@@ -745,7 +785,7 @@ button:disabled {
 
 .info-grid {
   display: grid;
-  grid-template-columns: 110px 1fr;
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 10px 12px;
   margin: 0;
   padding: 14px;
@@ -759,6 +799,8 @@ button:disabled {
 
 .info-grid dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .settings-backdrop {

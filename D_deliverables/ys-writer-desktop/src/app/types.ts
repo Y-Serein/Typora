@@ -1,0 +1,98 @@
+import type { Note } from "../domain/model";
+
+export type SaveStatus = "idle" | "saved" | "error";
+export type EditorMode = "plain" | "rich";
+export type ThemeStyle = "daily" | "eye" | "ink" | "mint";
+export type UIDensity = "comfortable" | "compact";
+export type SaveFileExt = "md" | "txt";
+export type SettingsSection = "general" | "editor" | "shortcuts" | "appearance" | "files";
+
+export type AppSettings = {
+  theme: ThemeStyle;
+  uiDensity: UIDensity;
+  sidebarWidth: number;
+  sidebarVisible: boolean;
+  rightPanelVisible: boolean;
+  vaultRoot: string | null;
+  lastOpenedFile: string | null;
+  selectedVaultDir: string;
+  vaultRecoveryBlocked: boolean;
+  defaultEditorMode: EditorMode;
+  restoreWorkspace: boolean;
+  editorFontSize: number;
+  editorLineHeight: number;
+  editorLeftGap: number;
+  uiScale: number;
+  zoomWithWheel: boolean;
+  defaultSaveExt: SaveFileExt;
+};
+
+export type CommandDefinition = {
+  id: string;
+  label: string;
+  enabled: boolean;
+  run: () => void | Promise<void>;
+};
+
+export type MarkdownFileResponse = {
+  path: string;
+  fileName: string;
+  fileExt: string;
+  content: string;
+};
+
+export type VaultTreeEntry = {
+  name: string;
+  path: string;
+  relativePath: string;
+  kind: "directory" | "file";
+  fileExt: string | null;
+  children: VaultTreeEntry[];
+  loaded?: boolean;
+  loading?: boolean;
+  hasMore?: boolean;
+  truncated?: boolean;
+  loadError?: string | null;
+};
+
+export type VaultDirectoryResponse = {
+  name: string;
+  path: string;
+  relativePath: string;
+  children: VaultTreeEntry[];
+  hasMore: boolean;
+  truncated: boolean;
+  error: string | null;
+};
+
+export type VaultLayoutState = {
+  sidebarWidth: number;
+  sidebarVisible: boolean;
+  rightPanelVisible: boolean;
+  editorLeftGap: number;
+  uiScale: number;
+};
+
+export type VaultWorkspaceState = {
+  version: 1;
+  recentFiles: string[];
+  lastOpenedFile: string | null;
+  selectedDir: string;
+  expandedDirs: string[];
+  layout: VaultLayoutState;
+};
+
+export type VaultConfig = {
+  version: 1;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VaultInitResponse = {
+  root: string;
+  config: VaultConfig;
+  workspace: VaultWorkspaceState;
+};
+
+export type ActiveNote = Note;

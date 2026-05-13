@@ -1,6 +1,6 @@
 export type ID = string;
 
-export type Card = {
+export type Note = {
   id: ID;
   title: string;
   markdown: string;
@@ -11,6 +11,8 @@ export type Card = {
   fileName?: string;
   fileExt?: string;
 };
+
+export type Card = Note;
 
 export type EditorCommandAction =
   | "paragraph"
@@ -69,7 +71,7 @@ export type Link = {
 };
 
 export type WorkspaceSnapshot = {
-  cards: Card[];
+  cards: Note[];
   whiteboards: Whiteboard[];
   whiteboardItems: WhiteboardItem[];
   tags: Tag[];

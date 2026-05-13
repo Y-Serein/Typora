@@ -1,5 +1,8 @@
-# Local context artifacts
-C_context/images/
+# Local agent/session/context artifacts
+AGENTS.md
+HANDOFF.md
+C_context/
+R_raw/
 
 # Dependencies
 node_modules/
