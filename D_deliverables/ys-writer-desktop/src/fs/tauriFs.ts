@@ -3,6 +3,7 @@ import type {
   MarkdownFileResponse,
   VaultDirectoryResponse,
   VaultInitResponse,
+  VaultIndexResponse,
   VaultWorkspaceState,
 } from "../app/types";
 
@@ -20,6 +21,10 @@ export function initVault(root: string) {
 
 export function readVaultDirectory(root: string, relativePath: string, limit: number) {
   return invoke<VaultDirectoryResponse>("read_vault_directory", { root, relativePath, limit });
+}
+
+export function readVaultIndexFiles(root: string) {
+  return invoke<VaultIndexResponse>("read_vault_index_files", { root });
 }
 
 export function createVaultEntry(root: string, relativePath: string, kind: "file" | "directory") {

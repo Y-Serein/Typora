@@ -1,6 +1,6 @@
 use crate::{
     fs_ops,
-    model::{MarkdownFile, VaultDirectory, VaultInitResponse, VaultWorkspaceState},
+    model::{MarkdownFile, VaultDirectory, VaultIndexResponse, VaultInitResponse, VaultWorkspaceState},
     vault,
 };
 
@@ -22,6 +22,11 @@ pub fn init_vault(root: String) -> Result<VaultInitResponse, String> {
 #[tauri::command]
 pub fn read_vault_directory(root: String, relative_path: String, limit: Option<usize>) -> Result<VaultDirectory, String> {
     vault::read_vault_directory(root, relative_path, limit)
+}
+
+#[tauri::command]
+pub fn read_vault_index_files(root: String) -> Result<VaultIndexResponse, String> {
+    vault::read_vault_index_files(root)
 }
 
 #[tauri::command]

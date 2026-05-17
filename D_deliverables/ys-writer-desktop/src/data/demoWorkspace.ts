@@ -6,8 +6,8 @@ export const demoWorkspace: WorkspaceSnapshot = {
   cards: [
     {
       id: "card-landing",
-      title: "YS Writer Desktop",
-      markdown: `# YS Writer Desktop
+      title: "Serein",
+      markdown: `# Serein
 
 这是正式桌面版的最小落地工程。
 

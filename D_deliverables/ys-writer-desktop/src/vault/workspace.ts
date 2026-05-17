@@ -1,21 +1,24 @@
 import { defaultVaultWorkspaceState } from "../app/defaults";
-import type { MarkdownFileResponse, VaultWorkspaceState } from "../app/types";
+import type { MarkdownFileResponse, SaveFileExt, VaultWorkspaceState } from "../app/types";
 import type { Note } from "../domain/model";
-import { extractFirstLineTitle, stripExtension } from "../shared/markdown";
+import { ensureVaultFileName, extractFirstLineTitle, stripExtension } from "../shared/markdown";
 
-export function createDraftNote(): Note {
+export function createDraftNote(defaultName = "未命名笔记", defaultExt: SaveFileExt = "md"): Note {
   const now = new Date().toISOString();
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `note-${Date.now()}`;
+  const fileName = ensureVaultFileName(defaultName, defaultExt);
+  const title = stripExtension(fileName).trim() || "未命名笔记";
 
   return {
     id,
-    title: "未命名笔记",
-    markdown: "# 未命名笔记\n\n开始写作。",
+    title,
+    markdown: `# ${title}\n\n`,
     tagIds: [],
     createdAt: now,
     updatedAt: now,
+    dirty: true,
   };
 }
 
@@ -37,12 +40,13 @@ export function createFileNote(file: MarkdownFileResponse): Note {
     filePath: file.path,
     fileName: file.fileName,
     fileExt: file.fileExt,
+    dirty: false,
   };
 }
 
 export function isEmptyDraft(note: Note) {
   return !note.filePath
-    && (note.markdown.trim() === "" || note.markdown === "# 未命名笔记\n\n开始写作。");
+    && (note.markdown.trim() === "" || /^# .+\n\n?$/.test(note.markdown));
 }
 
 export function mergeWorkspaceState(
@@ -67,6 +71,7 @@ export function mergeWorkspaceState(
     layout: {
       ...fallbackLayout,
       ...workspace.layout,
+      rightPanelWidth: workspace.layout.rightPanelWidth ?? fallbackLayout.rightPanelWidth,
     },
   };
 }

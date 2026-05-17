@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     model::{
-        VaultConfig, VaultDirectory, VaultInitResponse, VaultLayoutState, VaultTreeEntry,
-        VaultWorkspaceState,
+        VaultConfig, VaultDirectory, VaultIndexFile, VaultIndexResponse, VaultInitResponse,
+        VaultLayoutState, VaultTreeEntry, VaultWorkspaceState,
     },
     path_security::{
         ensure_path_inside_root, ensure_supported_text_path, is_supported_text_path,
@@ -18,6 +18,8 @@ use crate::{
 const SEREIN_DIR: &str = ".serein";
 const VAULT_CONFIG: &str = "vault.json";
 const WORKSPACE_CONFIG: &str = "workspace.json";
+const INDEX_FILE_LIMIT: usize = 2000;
+const INDEX_FILE_SIZE_LIMIT: u64 = 1024 * 1024;
 
 pub fn init_vault(root: String) -> Result<VaultInitResponse, String> {
     let root_path = fs::canonicalize(&root)
@@ -152,6 +154,28 @@ pub fn read_vault_directory(root: String, relative_path: String, limit: Option<u
     })
 }
 
+pub fn read_vault_index_files(root: String) -> Result<VaultIndexResponse, String> {
+    let root_path = fs::canonicalize(&root)
+        .map_err(|error| format!("Failed to read vault root: {error}"))?;
+
+    if !root_path.is_dir() {
+        return Err("Vault root is not a directory.".to_string());
+    }
+
+    let mut files = Vec::new();
+    let mut truncated = false;
+    let mut skipped_files = 0;
+    collect_vault_index_files(&root_path, &root_path, &mut files, &mut truncated, &mut skipped_files)?;
+
+    files.sort_by(|left, right| left.relative_path.to_lowercase().cmp(&right.relative_path.to_lowercase()));
+
+    Ok(VaultIndexResponse {
+        files,
+        truncated,
+        skipped_files,
+    })
+}
+
 pub fn create_vault_entry(root: String, relative_path: String, kind: String) -> Result<String, String> {
     let target = resolve_vault_path(&root, &relative_path, false)?;
     if target.exists() {
@@ -220,6 +244,81 @@ pub fn delete_vault_entry(root: String, relative_path: String) -> Result<(), Str
     } else {
         fs::remove_file(&target).map_err(|error| format!("Failed to delete file: {error}"))
     }
+}
+
+fn collect_vault_index_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<VaultIndexFile>,
+    truncated: &mut bool,
+    skipped_files: &mut usize,
+) -> Result<(), String> {
+    if files.len() >= INDEX_FILE_LIMIT {
+        *truncated = true;
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("Failed to read vault index directory: {error}"))?;
+
+    for entry in entries {
+        if files.len() >= INDEX_FILE_LIMIT {
+            *truncated = true;
+            break;
+        }
+
+        let entry = entry.map_err(|error| format!("Failed to read vault index entry: {error}"))?;
+        let entry_path = entry.path();
+        let file_type = entry.file_type()
+            .map_err(|error| format!("Failed to read vault index entry type: {error}"))?;
+        let name = entry_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        if file_type.is_dir() {
+            if should_skip_directory(&name) {
+                continue;
+            }
+
+            collect_vault_index_files(root, &entry_path, files, truncated, skipped_files)?;
+            continue;
+        }
+
+        if !file_type.is_file() || !is_supported_text_path(&entry_path) {
+            continue;
+        }
+
+        let metadata = entry.metadata()
+            .map_err(|error| format!("Failed to read vault index file metadata: {error}"))?;
+        if metadata.len() > INDEX_FILE_SIZE_LIMIT {
+            *skipped_files += 1;
+            continue;
+        }
+
+        let content = match fs::read_to_string(&entry_path) {
+            Ok(content) => content,
+            Err(_) => {
+                *skipped_files += 1;
+                continue;
+            }
+        };
+
+        files.push(VaultIndexFile {
+            path: entry_path.to_string_lossy().to_string(),
+            relative_path: entry_path
+                .strip_prefix(root)
+                .ok()
+                .map(to_slash_path)
+                .unwrap_or_else(|| name.clone()),
+            file_name: name,
+            file_ext: normalized_extension(&entry_path).unwrap_or_else(|| "md".to_string()),
+            content,
+        });
+    }
+
+    Ok(())
 }
 
 fn read_or_create_vault_config(root: &Path, path: &Path) -> Result<VaultConfig, String> {

@@ -2696,6 +2696,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serein-desktop"
+version = "0.0.1"
+dependencies = [
+ "indexmap 1.9.3",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+]
+
+[[package]]
 name = "serialize-to-javascript"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4628,18 +4640,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
-]
-
-[[package]]
-name = "ys-writer-desktop"
-version = "0.0.1"
-dependencies = [
- "indexmap 1.9.3",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ export type Note = {
   filePath?: string;
   fileName?: string;
   fileExt?: string;
+  dirty?: boolean;
 };
 
 export type Card = Note;

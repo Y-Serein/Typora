@@ -15,6 +15,7 @@ pub fn run() {
             commands::write_markdown_file,
             commands::init_vault,
             commands::read_vault_directory,
+            commands::read_vault_index_files,
             commands::create_vault_entry,
             commands::rename_vault_entry,
             commands::delete_vault_entry,

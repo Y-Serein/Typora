@@ -4,15 +4,68 @@ export function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function stripAtxClosing(text: string) {
+  return text.replace(/\s+#{1,}\s*$/, "").trim();
+}
+
+function extractMarkdownHeadings(markdown: string) {
+  let offset = 0;
+  let previousLine: { text: string; start: number; end: number } | null = null;
+  let inFence = false;
+  const headings: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; start: number; end: number }> = [];
+
+  for (const line of markdown.split("\n")) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length;
+    const fenceMatch = line.match(/^\s{0,3}(```+|~~~+)/);
+
+    if (fenceMatch) {
+      inFence = !inFence;
+      previousLine = null;
+      offset = lineEnd + 1;
+      continue;
+    }
+
+    if (!inFence) {
+      const atxMatch = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*$/);
+      if (atxMatch) {
+        const text = stripAtxClosing(atxMatch[2]);
+        if (text) {
+          headings.push({
+            level: atxMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+            text,
+            start: lineStart,
+            end: lineEnd,
+          });
+        }
+        previousLine = null;
+        offset = lineEnd + 1;
+        continue;
+      }
+
+      const setextMatch = line.match(/^\s{0,3}(=+|-+)\s*$/);
+      if (setextMatch && previousLine?.text.trim()) {
+        headings.push({
+          level: setextMatch[1].startsWith("=") ? 1 : 2,
+          text: previousLine.text.trim(),
+          start: previousLine.start,
+          end: lineEnd,
+        });
+        previousLine = null;
+        offset = lineEnd + 1;
+        continue;
+      }
+    }
+
+    previousLine = line.trim() ? { text: line, start: lineStart, end: lineEnd } : null;
+    offset = lineEnd + 1;
+  }
+
+  return headings;
+}
+
 export function extractOutline(markdown: string) {
-  return markdown
-    .split("\n")
-    .map((line) => line.match(/^(#{1,3})\s+(.+)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({
-      level: match[1].length,
-      text: match[2],
-    }));
+  return extractMarkdownHeadings(markdown).map(({ level, text }) => ({ level, text }));
 }
 
 export function extractFirstLineTitle(markdown: string) {
@@ -22,17 +75,34 @@ export function extractFirstLineTitle(markdown: string) {
 }
 
 export function getHeadingOffsets(markdown: string) {
-  let offset = 0;
-  const offsets: Array<{ start: number; end: number }> = [];
+  return extractMarkdownHeadings(markdown).map(({ start, end }) => ({ start, end }));
+}
 
-  for (const line of markdown.split("\n")) {
-    if (/^(#{1,3})\s+(.+)$/.test(line)) {
-      offsets.push({ start: offset, end: offset + line.length });
-    }
-    offset += line.length + 1;
+export function countDocumentText(markdown: string) {
+  const text = markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[#>*_[\]()`~!-]/g, " ");
+  const compactCharacters = text.match(/[\p{L}\p{N}]/gu)?.length ?? 0;
+
+  const Segmenter = (Intl as typeof Intl & {
+    Segmenter?: new (
+      locale?: string | string[],
+      options?: { granularity: "word" },
+    ) => {
+      segment: (input: string) => Iterable<{ isWordLike?: boolean }>;
+    };
+  }).Segmenter;
+  if (Segmenter) {
+    const segmenter = new Segmenter(undefined, { granularity: "word" });
+    const words = Array.from(segmenter.segment(text))
+      .filter((segment) => segment.isWordLike)
+      .length;
+    return { characters: compactCharacters, words };
   }
 
-  return offsets;
+  const words = text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+  return { characters: compactCharacters, words };
 }
 
 export function stripExtension(fileName: string) {
@@ -59,6 +129,18 @@ export function ensureVaultFileName(name: string, defaultExt: SaveFileExt) {
   const extension = pathExtension(cleanName);
   if (extension === "md" || extension === "markdown" || extension === "txt") return cleanName;
   return `${cleanName}.${defaultExt}`;
+}
+
+export function vaultFileNameCandidate(name: string, defaultExt: SaveFileExt, index: number) {
+  const fileName = ensureVaultFileName(name, defaultExt);
+  if (index <= 0) return fileName;
+
+  const extensionMatch = fileName.match(/(\.[^.]+)$/);
+  if (!extensionMatch) return `${fileName} ${index + 1}`;
+
+  const extension = extensionMatch[1];
+  const baseName = fileName.slice(0, -extension.length);
+  return `${baseName} ${index + 1}${extension}`;
 }
 
 export function joinVaultPath(directory: string, name: string) {

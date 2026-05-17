@@ -32,6 +32,24 @@ pub struct VaultDirectory {
     pub error: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultIndexFile {
+    pub path: String,
+    pub relative_path: String,
+    pub file_name: String,
+    pub file_ext: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultIndexResponse {
+    pub files: Vec<VaultIndexFile>,
+    pub truncated: bool,
+    pub skipped_files: usize,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultConfig {

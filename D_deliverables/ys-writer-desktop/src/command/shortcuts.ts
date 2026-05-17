@@ -57,6 +57,7 @@ export const menuGroups: MenuGroup[] = [
     label: "文件",
     items: [
       { label: "新建笔记", commandId: "file.new" },
+      { label: "新建文件夹", commandId: "file.newFolder" },
       { label: "打开文件", commandId: "file.open" },
       { label: "打开 Vault", commandId: "file.openVault" },
       { label: "保存", commandId: "file.save" },

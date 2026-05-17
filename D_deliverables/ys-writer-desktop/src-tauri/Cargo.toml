@@ -1,12 +1,12 @@
 [package]
-name = "ys-writer-desktop"
+name = "serein-desktop"
 version = "0.0.1"
-description = "YS Writer desktop application"
-authors = ["YS Writer"]
+description = "Serein desktop Markdown writing application"
+authors = ["Serein"]
 edition = "2021"
 
 [lib]
-name = "ys_writer_desktop_lib"
+name = "serein_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

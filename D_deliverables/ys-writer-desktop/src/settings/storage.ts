@@ -1,19 +1,30 @@
 import {
   LEGACY_SETTINGS_STORAGE_KEY,
   MAX_EDITOR_LEFT_GAP,
+  MAX_RIGHT_PANEL_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MAX_UI_SCALE,
   MIN_EDITOR_LEFT_GAP,
+  MIN_RIGHT_PANEL_WIDTH,
   MIN_SIDEBAR_WIDTH,
   MIN_UI_SCALE,
   SETTINGS_STORAGE_KEY,
   defaultSettings,
 } from "../app/defaults";
+import { isAppLanguage } from "../app/i18n";
 import type { AppSettings, EditorMode, ThemeStyle, UIDensity } from "../app/types";
+
+const DEFAULT_NOTE_NAME_MAX_LENGTH = 80;
+const EDITOR_FONT_MAX_LENGTH = 80;
 
 export function clampSidebarWidth(width: number) {
   if (!Number.isFinite(width)) return defaultSettings.sidebarWidth;
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
+export function clampRightPanelWidth(width: number) {
+  if (!Number.isFinite(width)) return defaultSettings.rightPanelWidth;
+  return Math.min(MAX_RIGHT_PANEL_WIDTH, Math.max(MIN_RIGHT_PANEL_WIDTH, width));
 }
 
 export function clampEditorLeftGap(value: number) {
@@ -24,6 +35,26 @@ export function clampEditorLeftGap(value: number) {
 export function clampUiScale(value: number) {
   if (!Number.isFinite(value)) return defaultSettings.uiScale;
   return Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, value));
+}
+
+export function normalizeDefaultNewNoteName(value: unknown) {
+  if (typeof value !== "string") return defaultSettings.defaultNewNoteName;
+  const cleaned = value
+    .replace(/[\\/]/g, " ")
+    .replace(/^\.+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned ? cleaned.slice(0, DEFAULT_NOTE_NAME_MAX_LENGTH) : defaultSettings.defaultNewNoteName;
+}
+
+export function normalizeEditorFontFamily(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const cleaned = value
+    .replace(/["'`;{}]/g, "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned ? cleaned.slice(0, EDITOR_FONT_MAX_LENGTH) : fallback;
 }
 
 export function readSettings(): AppSettings {
@@ -50,6 +81,7 @@ export function readSettings(): AppSettings {
 
     return {
       theme,
+      language: isAppLanguage(parsed.language) ? parsed.language : defaultSettings.language,
       uiDensity,
       sidebarWidth: typeof parsed.sidebarWidth === "number" ? clampSidebarWidth(parsed.sidebarWidth) : defaultSettings.sidebarWidth,
       sidebarVisible: typeof parsed.sidebarVisible === "boolean" ? parsed.sidebarVisible : defaultSettings.sidebarVisible,
@@ -58,6 +90,7 @@ export function readSettings(): AppSettings {
         : typeof parsed.outlineVisible === "boolean"
           ? parsed.outlineVisible
           : defaultSettings.rightPanelVisible,
+      rightPanelWidth: typeof parsed.rightPanelWidth === "number" ? clampRightPanelWidth(parsed.rightPanelWidth) : defaultSettings.rightPanelWidth,
       vaultRoot: typeof parsed.vaultRoot === "string" && parsed.vaultRoot
         ? parsed.vaultRoot
         : typeof parsed.workspaceRoot === "string" && parsed.workspaceRoot
@@ -76,12 +109,15 @@ export function readSettings(): AppSettings {
           : defaultSettings.vaultRecoveryBlocked,
       defaultEditorMode,
       restoreWorkspace: typeof parsed.restoreWorkspace === "boolean" ? parsed.restoreWorkspace : defaultSettings.restoreWorkspace,
+      editorLatinFont: normalizeEditorFontFamily(parsed.editorLatinFont, defaultSettings.editorLatinFont),
+      editorCjkFont: normalizeEditorFontFamily(parsed.editorCjkFont, defaultSettings.editorCjkFont),
       editorFontSize: typeof parsed.editorFontSize === "number" ? parsed.editorFontSize : defaultSettings.editorFontSize,
       editorLineHeight: typeof parsed.editorLineHeight === "number" ? parsed.editorLineHeight : defaultSettings.editorLineHeight,
       editorLeftGap: typeof parsed.editorLeftGap === "number" ? clampEditorLeftGap(parsed.editorLeftGap) : defaultSettings.editorLeftGap,
       uiScale: typeof parsed.uiScale === "number" ? clampUiScale(parsed.uiScale) : defaultSettings.uiScale,
       zoomWithWheel: typeof parsed.zoomWithWheel === "boolean" ? parsed.zoomWithWheel : defaultSettings.zoomWithWheel,
       defaultSaveExt: parsed.defaultSaveExt === "txt" ? "txt" : "md",
+      defaultNewNoteName: normalizeDefaultNewNoteName(parsed.defaultNewNoteName),
     };
   } catch (error) {
     console.warn("Failed to read settings", error);

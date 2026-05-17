@@ -1,4 +1,5 @@
 import type { Note } from "../domain/model";
+import type { AppLanguage } from "./i18n";
 
 export type SaveStatus = "idle" | "saved" | "error";
 export type EditorMode = "plain" | "rich";
@@ -9,22 +10,27 @@ export type SettingsSection = "general" | "editor" | "shortcuts" | "appearance" 
 
 export type AppSettings = {
   theme: ThemeStyle;
+  language: AppLanguage;
   uiDensity: UIDensity;
   sidebarWidth: number;
   sidebarVisible: boolean;
   rightPanelVisible: boolean;
+  rightPanelWidth: number;
   vaultRoot: string | null;
   lastOpenedFile: string | null;
   selectedVaultDir: string;
   vaultRecoveryBlocked: boolean;
   defaultEditorMode: EditorMode;
   restoreWorkspace: boolean;
+  editorLatinFont: string;
+  editorCjkFont: string;
   editorFontSize: number;
   editorLineHeight: number;
   editorLeftGap: number;
   uiScale: number;
   zoomWithWheel: boolean;
   defaultSaveExt: SaveFileExt;
+  defaultNewNoteName: string;
 };
 
 export type CommandDefinition = {
@@ -65,10 +71,25 @@ export type VaultDirectoryResponse = {
   error: string | null;
 };
 
+export type VaultIndexFileResponse = {
+  path: string;
+  relativePath: string;
+  fileName: string;
+  fileExt: string;
+  content: string;
+};
+
+export type VaultIndexResponse = {
+  files: VaultIndexFileResponse[];
+  truncated: boolean;
+  skippedFiles: number;
+};
+
 export type VaultLayoutState = {
   sidebarWidth: number;
   sidebarVisible: boolean;
   rightPanelVisible: boolean;
+  rightPanelWidth: number;
   editorLeftGap: number;
   uiScale: number;
 };
