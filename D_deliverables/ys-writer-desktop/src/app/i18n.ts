@@ -106,6 +106,9 @@ export const appText = {
     status: {
       saved: "已保存",
       memoryDraft: "内存草稿",
+      noDocument: "未打开文件",
+      linkOpenFailed: "无法跳转：没有找到可打开的链接目标。",
+      closeFailed: "关闭窗口失败，请再试一次。",
     },
     dialog: {
       ok: "确定",
@@ -125,7 +128,9 @@ export const appText = {
       linkUrl: "链接地址",
       find: "查找",
       noMatches: "未找到匹配项",
-      deleteEntry: (name: string) => `删除 ${name}？这会从磁盘删除。`,
+      deleteEntry: (name: string) => `删除 ${name}？这会移到 .serein/trash，不会直接从磁盘永久删除。`,
+      unsavedChangesTitle: "当前文档尚未保存",
+      unsavedChangesMessage: "继续操作会丢弃未保存的修改。请先保存，或确认继续。",
       about: `${APP_NAME} ${APP_VERSION}`,
     },
     sidebar: {
@@ -145,9 +150,13 @@ export const appText = {
       newNote: "新建文档",
       resizeSidebar: "调整侧栏宽度",
     },
+    editor: {
+      emptyHint: "请打开文件",
+    },
     knowledge: {
       title: "知识",
       backlinks: "反向链接",
+      outgoing: "出链",
       graph: "图谱",
       dock: "停靠",
       float: "浮动",
@@ -155,6 +164,11 @@ export const appText = {
       indexing: "正在索引 Vault...",
       indexPartial: "索引达到上限，图谱可能不完整。",
       skippedFiles: (count: number) => `${count} 个过大或不可读文件已跳过。`,
+      relationshipSummary: (backlinks: number, outgoing: number) => `${backlinks} 条反向链接，${outgoing} 条出链`,
+      noOutgoingLinks: "当前文件没有出链",
+      linkedMentions: "已链接提及",
+      outgoingLinks: "链接",
+      unresolvedMentions: "未解析",
       noBacklinks: "当前文件没有反向链接",
       openVaultForBacklinks: "打开 Vault 后索引反向链接",
       localGraphAria: "局部图谱",
@@ -329,6 +343,9 @@ export const appText = {
     status: {
       saved: "Saved",
       memoryDraft: "Memory draft",
+      noDocument: "No file open",
+      linkOpenFailed: "Cannot jump: no openable link target was found.",
+      closeFailed: "Failed to close the window. Try again.",
     },
     dialog: {
       ok: "OK",
@@ -348,7 +365,9 @@ export const appText = {
       linkUrl: "Link URL",
       find: "Find",
       noMatches: "No matches found",
-      deleteEntry: (name: string) => `Delete ${name}? This will delete it from disk.`,
+      deleteEntry: (name: string) => `Delete ${name}? This will move it to .serein/trash, not permanently delete it from disk.`,
+      unsavedChangesTitle: "Current note has unsaved changes",
+      unsavedChangesMessage: "Continuing will discard unsaved edits. Save first, or confirm to continue.",
       about: `${APP_NAME} ${APP_VERSION}`,
     },
     sidebar: {
@@ -368,9 +387,13 @@ export const appText = {
       newNote: "New note",
       resizeSidebar: "Resize sidebar",
     },
+    editor: {
+      emptyHint: "Open a file",
+    },
     knowledge: {
       title: "Knowledge",
       backlinks: "Backlinks",
+      outgoing: "Outgoing",
       graph: "Graph",
       dock: "Dock",
       float: "Float",
@@ -378,6 +401,11 @@ export const appText = {
       indexing: "Indexing vault...",
       indexPartial: "Index limit reached; graph may be partial.",
       skippedFiles: (count: number) => `${count} large or unreadable files skipped.`,
+      relationshipSummary: (backlinks: number, outgoing: number) => `${backlinks} backlinks, ${outgoing} outgoing links`,
+      noOutgoingLinks: "No outgoing links from this file",
+      linkedMentions: "Linked mentions",
+      outgoingLinks: "Links",
+      unresolvedMentions: "Unresolved",
       noBacklinks: "No backlinks to this file",
       openVaultForBacklinks: "Open a vault to index backlinks",
       localGraphAria: "Local graph",

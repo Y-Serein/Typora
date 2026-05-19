@@ -10,6 +10,8 @@ export type Note = {
   filePath?: string;
   fileName?: string;
   fileExt?: string;
+  fileModifiedAtMs?: number | null;
+  fileSize?: number;
   dirty?: boolean;
 };
 

@@ -45,6 +45,8 @@ export type MarkdownFileResponse = {
   fileName: string;
   fileExt: string;
   content: string;
+  modifiedAtMs: number | null;
+  size: number;
 };
 
 export type VaultTreeEntry = {

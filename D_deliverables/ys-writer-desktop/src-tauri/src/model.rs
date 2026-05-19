@@ -7,6 +7,8 @@ pub struct MarkdownFile {
     pub file_name: String,
     pub file_ext: String,
     pub content: String,
+    pub modified_at_ms: Option<u64>,
+    pub size: u64,
 }
 
 #[derive(Serialize)]

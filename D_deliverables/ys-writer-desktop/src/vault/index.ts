@@ -52,6 +52,11 @@ export type VaultIndex = {
   skippedFiles: number;
 };
 
+export type LocalGraph = {
+  nodes: VaultGraphNode[];
+  edges: VaultGraphEdge[];
+};
+
 type RawVaultLink = {
   kind: "wiki" | "markdown";
   label: string;
@@ -62,6 +67,8 @@ type RawVaultLink = {
 type ParsedVaultFile = Omit<VaultIndexedFile, "outgoingLinks"> & {
   rawLinks: RawVaultLink[];
 };
+
+type LinkTargetFile = Pick<VaultIndexedFile, "path" | "relativePath">;
 
 const INDEX_FILE_NAMES = ["index.md", "index.markdown", "index.txt", "readme.md", "readme.markdown", "readme.txt"];
 
@@ -135,8 +142,35 @@ export function getBacklinks(index: VaultIndex | null, path: string | null | und
   return index.backlinksByPath.get(normalizeFilePath(path)) ?? [];
 }
 
-export function createLocalGraph(index: VaultIndex | null, path: string | null | undefined) {
-  const currentFile = findIndexedFile(index, path);
+export function createDraftIndexedFile(index: VaultIndex | null, path: string | null | undefined, markdown: string) {
+  const existing = findIndexedFile(index, path);
+  if (!index || !existing) return null;
+
+  const parsed = parseVaultFile({
+    path: existing.path,
+    relativePath: existing.relativePath,
+    fileName: existing.fileName,
+    fileExt: existing.fileExt,
+    content: markdown,
+  });
+  const candidates = createCandidateMap(index.files);
+  const { rawLinks, ...file } = parsed;
+
+  return {
+    ...file,
+    outgoingLinks: rawLinks.map((link) => ({
+      kind: link.kind,
+      label: link.label,
+      rawTarget: link.rawTarget,
+      targetPath: resolveLinkTarget(link, candidates)?.path ?? null,
+      targetHeading: targetHeading(link.rawTarget),
+      unresolvedReason: unresolvedReason(link, candidates),
+    })),
+  };
+}
+
+export function createLocalGraph(index: VaultIndex | null, path: string | null | undefined, draftFile?: VaultIndexedFile | null): LocalGraph {
+  const currentFile = draftFile ?? findIndexedFile(index, path);
   if (!index || !currentFile) return { nodes: [], edges: [] };
 
   const currentPath = normalizeFilePath(currentFile.path);
@@ -173,7 +207,8 @@ export function createLocalGraph(index: VaultIndex | null, path: string | null |
     const sourcePath = normalizeFilePath(source.path);
     if (!nodePaths.has(sourcePath)) continue;
 
-    for (const link of source.outgoingLinks) {
+    const sourceLinks = sourcePath === currentPath ? currentFile.outgoingLinks : source.outgoingLinks;
+    for (const link of sourceLinks) {
       if (!link.targetPath) continue;
       const targetPath = normalizeFilePath(link.targetPath);
       if (!nodePaths.has(targetPath)) continue;
@@ -186,6 +221,18 @@ export function createLocalGraph(index: VaultIndex | null, path: string | null |
   }
 
   return { nodes, edges };
+}
+
+function createCandidateMap(files: LinkTargetFile[]) {
+  const candidates = new Map<string, LinkTargetFile>();
+
+  for (const file of files) {
+    addCandidate(candidates, file.relativePath, file);
+    addCandidate(candidates, stripExtension(file.relativePath), file);
+    addCandidate(candidates, stripExtension(pathFileName(file.relativePath)), file);
+  }
+
+  return candidates;
 }
 
 function parseVaultFile(file: VaultIndexFileResponse): ParsedVaultFile {
@@ -265,7 +312,7 @@ function extractRawLinks(markdown: string, sourceRelativePath: string): RawVault
   return links;
 }
 
-function resolveLinkTarget(link: RawVaultLink, candidates: Map<string, ParsedVaultFile>) {
+function resolveLinkTarget(link: RawVaultLink, candidates: Map<string, LinkTargetFile>) {
   if (link.kind === "markdown") {
     const targetPath = stripTargetMeta(link.rawTarget);
     const sourceDir = parentVaultDir(link.sourceRelativePath);
@@ -282,7 +329,7 @@ function resolveLinkTarget(link: RawVaultLink, candidates: Map<string, ParsedVau
     ?? null;
 }
 
-function unresolvedReason(link: RawVaultLink, candidates: Map<string, ParsedVaultFile>) {
+function unresolvedReason(link: RawVaultLink, candidates: Map<string, LinkTargetFile>) {
   if (resolveLinkTarget(link, candidates)) return null;
   if (link.kind === "markdown") {
     const target = stripTargetMeta(link.rawTarget);
@@ -293,7 +340,7 @@ function unresolvedReason(link: RawVaultLink, candidates: Map<string, ParsedVaul
   return "No matching vault file found.";
 }
 
-function addCandidate(candidates: Map<string, ParsedVaultFile>, key: string, file: ParsedVaultFile) {
+function addCandidate(candidates: Map<string, LinkTargetFile>, key: string, file: LinkTargetFile) {
   const normalized = normalizeVaultPath(key).toLowerCase();
   if (!normalized || candidates.has(normalized)) return;
   candidates.set(normalized, file);
@@ -361,7 +408,7 @@ function isDirectoryTarget(target: string) {
   return !normalized || target.endsWith("/") || target === "." || target === "./";
 }
 
-function resolveDirectoryIndex(relativeTarget: string, candidates: Map<string, ParsedVaultFile>) {
+function resolveDirectoryIndex(relativeTarget: string, candidates: Map<string, LinkTargetFile>) {
   const directory = normalizeVaultPath(relativeTarget);
   if (!directory && relativeTarget !== "." && relativeTarget !== "./") return null;
 

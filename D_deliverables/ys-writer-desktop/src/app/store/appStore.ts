@@ -1,0 +1,258 @@
+import { create } from "zustand";
+import { readShortcuts } from "../../command/shortcuts";
+import type { ShortcutEntry } from "../../command/shortcuts";
+import type { EditorCommandSignal, Note } from "../../domain/model";
+import { readSettings } from "../../settings/storage";
+import type {
+  AppSettings,
+  EditorMode,
+  SaveFileExt,
+  SaveStatus,
+  SettingsSection,
+  ThemeStyle,
+  UIDensity,
+  VaultTreeEntry,
+  VaultWorkspaceState,
+} from "../types";
+import { createEmptyNote, mergeWorkspaceState } from "../../vault/workspace";
+import type { VaultIndex } from "../../vault";
+
+type Updater<T> = T | ((current: T) => T);
+
+export type LeftPanelTab = "files" | "outline";
+export type KnowledgePanelTab = "backlinks" | "outgoing" | "graph";
+export type VaultIndexStatus = "idle" | "indexing" | "ready" | "error";
+
+export type AppDialog = {
+  id: number;
+  kind: "input" | "confirm" | "alert";
+  title: string;
+  message?: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  danger?: boolean;
+};
+
+export type AppDialogResult = string | boolean | null;
+
+type AppStoreState = {
+  initialSettings: AppSettings;
+  initialShortcuts: ShortcutEntry[];
+
+  notes: Note[];
+  activeNoteId: string;
+  savedAt: Date | null;
+  saveError: string | null;
+  saveStatus: SaveStatus;
+  editorMode: EditorMode;
+  richCommand: EditorCommandSignal | null;
+
+  language: AppSettings["language"];
+  theme: ThemeStyle;
+  uiDensity: UIDensity;
+  sidebarWidth: number;
+  sidebarVisible: boolean;
+  rightPanelVisible: boolean;
+  rightPanelWidth: number;
+  leftPanelTab: LeftPanelTab;
+  knowledgePanelTab: KnowledgePanelTab;
+  knowledgePanelFloating: boolean;
+  floatingPanelPosition: { x: number; y: number };
+
+  vaultRoot: string | null;
+  vaultTree: VaultTreeEntry | null;
+  vaultError: string | null;
+  vaultIndex: VaultIndex | null;
+  vaultIndexStatus: VaultIndexStatus;
+  vaultIndexError: string | null;
+  selectedVaultDir: string;
+  lastOpenedFile: string | null;
+  vaultRecoveryBlocked: boolean;
+  expandedDirs: Set<string>;
+  vaultWorkspace: VaultWorkspaceState;
+
+  defaultEditorModeSetting: EditorMode;
+  restoreWorkspace: boolean;
+  editorLatinFont: string;
+  editorCjkFont: string;
+  editorFontSize: number;
+  editorLineHeight: number;
+  editorLeftGap: number;
+  uiScale: number;
+  zoomWithWheel: boolean;
+  defaultSaveExt: SaveFileExt;
+  defaultNewNoteName: string;
+
+  settingsOpen: boolean;
+  settingsSection: SettingsSection;
+  appDialog: AppDialog | null;
+  appDialogInput: string;
+  openMenuId: string | null;
+  shortcuts: ShortcutEntry[];
+  shortcutEdits: Record<string, string>;
+};
+
+type AppStoreActions = {
+  setNotes: (value: Updater<Note[]>) => void;
+  setActiveNoteId: (value: string) => void;
+  setSavedAt: (value: Date | null) => void;
+  setSaveError: (value: string | null) => void;
+  setSaveStatus: (value: SaveStatus) => void;
+  setEditorMode: (value: EditorMode) => void;
+  setRichCommand: (value: EditorCommandSignal | null) => void;
+  setLanguage: (value: AppSettings["language"]) => void;
+  setTheme: (value: ThemeStyle) => void;
+  setUiDensity: (value: UIDensity) => void;
+  setSidebarWidth: (value: Updater<number>) => void;
+  setSidebarVisible: (value: Updater<boolean>) => void;
+  setRightPanelVisible: (value: Updater<boolean>) => void;
+  setRightPanelWidth: (value: Updater<number>) => void;
+  setLeftPanelTab: (value: LeftPanelTab) => void;
+  setKnowledgePanelTab: (value: KnowledgePanelTab) => void;
+  setKnowledgePanelFloating: (value: Updater<boolean>) => void;
+  setFloatingPanelPosition: (value: Updater<{ x: number; y: number }>) => void;
+  setVaultRoot: (value: string | null) => void;
+  setVaultTree: (value: Updater<VaultTreeEntry | null>) => void;
+  setVaultError: (value: string | null) => void;
+  setVaultIndex: (value: VaultIndex | null) => void;
+  setVaultIndexStatus: (value: VaultIndexStatus) => void;
+  setVaultIndexError: (value: string | null) => void;
+  setSelectedVaultDir: (value: string) => void;
+  setLastOpenedFile: (value: string | null) => void;
+  setVaultRecoveryBlocked: (value: boolean) => void;
+  setExpandedDirs: (value: Updater<Set<string>>) => void;
+  setVaultWorkspace: (value: Updater<VaultWorkspaceState>) => void;
+  setDefaultEditorModeSetting: (value: EditorMode) => void;
+  setRestoreWorkspace: (value: boolean) => void;
+  setEditorLatinFont: (value: string) => void;
+  setEditorCjkFont: (value: string) => void;
+  setEditorFontSize: (value: number) => void;
+  setEditorLineHeight: (value: number) => void;
+  setEditorLeftGap: (value: number) => void;
+  setUiScale: (value: Updater<number>) => void;
+  setZoomWithWheel: (value: boolean) => void;
+  setDefaultSaveExt: (value: SaveFileExt) => void;
+  setDefaultNewNoteName: (value: Updater<string>) => void;
+  setSettingsOpen: (value: boolean) => void;
+  setSettingsSection: (value: SettingsSection) => void;
+  setAppDialog: (value: AppDialog | null) => void;
+  setAppDialogInput: (value: string) => void;
+  setOpenMenuId: (value: Updater<string | null>) => void;
+  setShortcuts: (value: Updater<ShortcutEntry[]>) => void;
+  setShortcutEdits: (value: Updater<Record<string, string>>) => void;
+};
+
+function resolveUpdater<T>(current: T, value: Updater<T>) {
+  return typeof value === "function" ? (value as (current: T) => T)(current) : value;
+}
+
+const initialSettings = readSettings();
+const initialShortcuts = readShortcuts();
+const initialNote = createEmptyNote();
+
+export const useAppStore = create<AppStoreState & AppStoreActions>((set) => ({
+  initialSettings,
+  initialShortcuts,
+  notes: [initialNote],
+  activeNoteId: initialNote.id,
+  savedAt: null,
+  saveError: null,
+  saveStatus: "idle",
+  editorMode: initialSettings.defaultEditorMode,
+  richCommand: null,
+  language: initialSettings.language,
+  theme: initialSettings.theme,
+  uiDensity: initialSettings.uiDensity,
+  sidebarWidth: initialSettings.sidebarWidth,
+  sidebarVisible: initialSettings.sidebarVisible,
+  rightPanelVisible: initialSettings.rightPanelVisible,
+  rightPanelWidth: initialSettings.rightPanelWidth,
+  leftPanelTab: "files",
+  knowledgePanelTab: "backlinks",
+  knowledgePanelFloating: false,
+  floatingPanelPosition: { x: 920, y: 112 },
+  vaultRoot: initialSettings.restoreWorkspace ? initialSettings.vaultRoot : null,
+  vaultTree: null,
+  vaultError: null,
+  vaultIndex: null,
+  vaultIndexStatus: "idle",
+  vaultIndexError: null,
+  selectedVaultDir: initialSettings.selectedVaultDir,
+  lastOpenedFile: initialSettings.lastOpenedFile,
+  vaultRecoveryBlocked: initialSettings.vaultRecoveryBlocked,
+  expandedDirs: new Set([""]),
+  vaultWorkspace: mergeWorkspaceState(null, {
+    sidebarWidth: initialSettings.sidebarWidth,
+    sidebarVisible: initialSettings.sidebarVisible,
+    rightPanelVisible: initialSettings.rightPanelVisible,
+    rightPanelWidth: initialSettings.rightPanelWidth,
+    editorLeftGap: initialSettings.editorLeftGap,
+    uiScale: initialSettings.uiScale,
+  }),
+  defaultEditorModeSetting: initialSettings.defaultEditorMode,
+  restoreWorkspace: initialSettings.restoreWorkspace,
+  editorLatinFont: initialSettings.editorLatinFont,
+  editorCjkFont: initialSettings.editorCjkFont,
+  editorFontSize: initialSettings.editorFontSize,
+  editorLineHeight: initialSettings.editorLineHeight,
+  editorLeftGap: initialSettings.editorLeftGap,
+  uiScale: initialSettings.uiScale,
+  zoomWithWheel: initialSettings.zoomWithWheel,
+  defaultSaveExt: initialSettings.defaultSaveExt,
+  defaultNewNoteName: initialSettings.defaultNewNoteName,
+  settingsOpen: false,
+  settingsSection: "general",
+  appDialog: null,
+  appDialogInput: "",
+  openMenuId: null,
+  shortcuts: initialShortcuts,
+  shortcutEdits: Object.fromEntries(initialShortcuts.map((shortcut) => [shortcut.id, shortcut.currentKeys.join(", ")])),
+
+  setNotes: (value) => set((state) => ({ notes: resolveUpdater(state.notes, value) })),
+  setActiveNoteId: (value) => set({ activeNoteId: value }),
+  setSavedAt: (value) => set({ savedAt: value }),
+  setSaveError: (value) => set({ saveError: value }),
+  setSaveStatus: (value) => set({ saveStatus: value }),
+  setEditorMode: (value) => set({ editorMode: value }),
+  setRichCommand: (value) => set({ richCommand: value }),
+  setLanguage: (value) => set({ language: value }),
+  setTheme: (value) => set({ theme: value }),
+  setUiDensity: (value) => set({ uiDensity: value }),
+  setSidebarWidth: (value) => set((state) => ({ sidebarWidth: resolveUpdater(state.sidebarWidth, value) })),
+  setSidebarVisible: (value) => set((state) => ({ sidebarVisible: resolveUpdater(state.sidebarVisible, value) })),
+  setRightPanelVisible: (value) => set((state) => ({ rightPanelVisible: resolveUpdater(state.rightPanelVisible, value) })),
+  setRightPanelWidth: (value) => set((state) => ({ rightPanelWidth: resolveUpdater(state.rightPanelWidth, value) })),
+  setLeftPanelTab: (value) => set({ leftPanelTab: value }),
+  setKnowledgePanelTab: (value) => set({ knowledgePanelTab: value }),
+  setKnowledgePanelFloating: (value) => set((state) => ({ knowledgePanelFloating: resolveUpdater(state.knowledgePanelFloating, value) })),
+  setFloatingPanelPosition: (value) => set((state) => ({ floatingPanelPosition: resolveUpdater(state.floatingPanelPosition, value) })),
+  setVaultRoot: (value) => set({ vaultRoot: value }),
+  setVaultTree: (value) => set((state) => ({ vaultTree: resolveUpdater(state.vaultTree, value) })),
+  setVaultError: (value) => set({ vaultError: value }),
+  setVaultIndex: (value) => set({ vaultIndex: value }),
+  setVaultIndexStatus: (value) => set({ vaultIndexStatus: value }),
+  setVaultIndexError: (value) => set({ vaultIndexError: value }),
+  setSelectedVaultDir: (value) => set({ selectedVaultDir: value }),
+  setLastOpenedFile: (value) => set({ lastOpenedFile: value }),
+  setVaultRecoveryBlocked: (value) => set({ vaultRecoveryBlocked: value }),
+  setExpandedDirs: (value) => set((state) => ({ expandedDirs: resolveUpdater(state.expandedDirs, value) })),
+  setVaultWorkspace: (value) => set((state) => ({ vaultWorkspace: resolveUpdater(state.vaultWorkspace, value) })),
+  setDefaultEditorModeSetting: (value) => set({ defaultEditorModeSetting: value }),
+  setRestoreWorkspace: (value) => set({ restoreWorkspace: value }),
+  setEditorLatinFont: (value) => set({ editorLatinFont: value }),
+  setEditorCjkFont: (value) => set({ editorCjkFont: value }),
+  setEditorFontSize: (value) => set({ editorFontSize: value }),
+  setEditorLineHeight: (value) => set({ editorLineHeight: value }),
+  setEditorLeftGap: (value) => set({ editorLeftGap: value }),
+  setUiScale: (value) => set((state) => ({ uiScale: resolveUpdater(state.uiScale, value) })),
+  setZoomWithWheel: (value) => set({ zoomWithWheel: value }),
+  setDefaultSaveExt: (value) => set({ defaultSaveExt: value }),
+  setDefaultNewNoteName: (value) => set((state) => ({ defaultNewNoteName: resolveUpdater(state.defaultNewNoteName, value) })),
+  setSettingsOpen: (value) => set({ settingsOpen: value }),
+  setSettingsSection: (value) => set({ settingsSection: value }),
+  setAppDialog: (value) => set({ appDialog: value }),
+  setAppDialogInput: (value) => set({ appDialogInput: value }),
+  setOpenMenuId: (value) => set((state) => ({ openMenuId: resolveUpdater(state.openMenuId, value) })),
+  setShortcuts: (value) => set((state) => ({ shortcuts: resolveUpdater(state.shortcuts, value) })),
+  setShortcutEdits: (value) => set((state) => ({ shortcutEdits: resolveUpdater(state.shortcutEdits, value) })),
+}));

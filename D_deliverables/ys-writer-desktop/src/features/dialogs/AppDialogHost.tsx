@@ -1,0 +1,57 @@
+import type { RefObject } from "react";
+import type { AppDialog, AppDialogResult } from "../../app/store/appStore";
+import { Button } from "../../shared/ui";
+
+type AppDialogHostProps = {
+  dialog: AppDialog | null;
+  input: string;
+  inputRef: RefObject<HTMLInputElement>;
+  onInputChange: (value: string) => void;
+  onClose: (result: AppDialogResult) => void;
+};
+
+export function AppDialogHost({ dialog, input, inputRef, onInputChange, onClose }: AppDialogHostProps) {
+  if (!dialog) return null;
+
+  return (
+    <div className="app-dialog-backdrop" role="presentation" onMouseDown={() => onClose(dialog.kind === "confirm" ? false : null)}>
+      <form
+        className="app-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialog.title}
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (dialog.kind === "input") {
+            onClose(input);
+            return;
+          }
+          onClose(true);
+        }}
+      >
+        <div className="app-dialog-header">
+          <h2>{dialog.title}</h2>
+        </div>
+        {dialog.message ? <p className="app-dialog-message">{dialog.message}</p> : null}
+        {dialog.kind === "input" ? (
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(event) => onInputChange(event.target.value)}
+          />
+        ) : null}
+        <div className="app-dialog-actions">
+          {dialog.cancelLabel ? (
+            <Button variant="soft" className="app-dialog-secondary" onClick={() => onClose(dialog.kind === "confirm" ? false : null)}>
+              {dialog.cancelLabel}
+            </Button>
+          ) : null}
+          <Button type="submit" variant={dialog.danger ? "danger" : "primary"} className={dialog.danger ? "app-dialog-danger" : "app-dialog-primary"}>
+            {dialog.confirmLabel}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}

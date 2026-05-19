@@ -11,8 +11,18 @@ export function readMarkdownFile(path: string) {
   return invoke<MarkdownFileResponse>("read_markdown_file", { path });
 }
 
-export function writeMarkdownFile(path: string, content: string) {
-  return invoke<MarkdownFileResponse>("write_markdown_file", { path, content });
+export function writeMarkdownFile(
+  path: string,
+  content: string,
+  expectedModifiedAtMs?: number | null,
+  expectedSize?: number | null,
+) {
+  return invoke<MarkdownFileResponse>("write_markdown_file", {
+    path,
+    content,
+    expectedModifiedAtMs: expectedModifiedAtMs ?? null,
+    expectedSize: expectedSize ?? null,
+  });
 }
 
 export function initVault(root: string) {
@@ -41,4 +51,8 @@ export function deleteVaultEntry(root: string, relativePath: string) {
 
 export function writeVaultWorkspaceState(root: string, workspace: VaultWorkspaceState) {
   return invoke<void>("write_vault_workspace_state", { root, workspace });
+}
+
+export function openExternalTarget(target: string) {
+  return invoke<void>("open_external_target", { target });
 }

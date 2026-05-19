@@ -3,6 +3,23 @@ import type { MarkdownFileResponse, SaveFileExt, VaultWorkspaceState } from "../
 import type { Note } from "../domain/model";
 import { ensureVaultFileName, extractFirstLineTitle, stripExtension } from "../shared/markdown";
 
+export function createEmptyNote(): Note {
+  const now = new Date().toISOString();
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `empty-${Date.now()}`;
+
+  return {
+    id,
+    title: "Serein",
+    markdown: "",
+    tagIds: [],
+    createdAt: now,
+    updatedAt: now,
+    dirty: false,
+  };
+}
+
 export function createDraftNote(defaultName = "未命名笔记", defaultExt: SaveFileExt = "md"): Note {
   const now = new Date().toISOString();
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -40,6 +57,8 @@ export function createFileNote(file: MarkdownFileResponse): Note {
     filePath: file.path,
     fileName: file.fileName,
     fileExt: file.fileExt,
+    fileModifiedAtMs: file.modifiedAtMs,
+    fileSize: file.size,
     dirty: false,
   };
 }
@@ -47,6 +66,10 @@ export function createFileNote(file: MarkdownFileResponse): Note {
 export function isEmptyDraft(note: Note) {
   return !note.filePath
     && (note.markdown.trim() === "" || /^# .+\n\n?$/.test(note.markdown));
+}
+
+export function isEmptyPlaceholder(note: Note | null | undefined) {
+  return Boolean(note && !note.filePath && !note.dirty && note.markdown.trim() === "");
 }
 
 export function mergeWorkspaceState(

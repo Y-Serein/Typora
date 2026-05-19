@@ -2,6 +2,7 @@ mod commands;
 mod fs_ops;
 mod model;
 mod path_security;
+mod safe_fs;
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,6 +21,7 @@ pub fn run() {
             commands::rename_vault_entry,
             commands::delete_vault_entry,
             commands::write_vault_workspace_state,
+            commands::open_external_target,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Serein Desktop");

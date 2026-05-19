@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -13,11 +13,13 @@ use crate::{
         ensure_path_inside_root, ensure_supported_text_path, is_supported_text_path,
         normalized_extension, resolve_vault_path, should_skip_directory, to_slash_path,
     },
+    safe_fs::{atomic_write, timestamp_ms},
 };
 
 const SEREIN_DIR: &str = ".serein";
 const VAULT_CONFIG: &str = "vault.json";
 const WORKSPACE_CONFIG: &str = "workspace.json";
+const TRASH_DIR: &str = "trash";
 const INDEX_FILE_LIMIT: usize = 2000;
 const INDEX_FILE_SIZE_LIMIT: u64 = 1024 * 1024;
 
@@ -189,7 +191,7 @@ pub fn create_vault_entry(root: String, relative_path: String, kind: String) -> 
                     .to_str()
                     .ok_or_else(|| "Target path is not valid UTF-8.".to_string())?,
             )?;
-            fs::write(&target, b"").map_err(|error| format!("Failed to create file: {error}"))?;
+            atomic_write(&target, b"")?;
             Ok(target.to_string_lossy().to_string())
         }
         "directory" => {
@@ -238,12 +240,18 @@ pub fn delete_vault_entry(root: String, relative_path: String) -> Result<(), Str
         return Err("Cannot delete vault root.".to_string());
     }
 
+    let root_path = fs::canonicalize(&root)
+        .map_err(|error| format!("Failed to resolve vault root: {error}"))?;
     let target = resolve_vault_path(&root, &relative_path, true)?;
-    if target.is_dir() {
-        fs::remove_dir_all(&target).map_err(|error| format!("Failed to delete folder: {error}"))
-    } else {
-        fs::remove_file(&target).map_err(|error| format!("Failed to delete file: {error}"))
-    }
+    let trash_dir = root_path.join(SEREIN_DIR).join(TRASH_DIR);
+    fs::create_dir_all(&trash_dir)
+        .map_err(|error| format!("Failed to create vault trash folder: {error}"))?;
+
+    let trash_target = unique_trash_path(&trash_dir, &target)?;
+    fs::rename(&target, &trash_target)
+        .map_err(|error| format!(
+            "Failed to move entry to vault trash. Nothing was permanently deleted. Check permissions or open the parent folder and move it manually: {error}"
+        ))
 }
 
 fn collect_vault_index_files(
@@ -395,8 +403,28 @@ fn normalize_workspace_state(mut workspace: VaultWorkspaceState) -> VaultWorkspa
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
     let serialized = serde_json::to_string_pretty(value)
         .map_err(|error| format!("Failed to serialize vault metadata: {error}"))?;
-    fs::write(path, serialized.as_bytes())
-        .map_err(|error| format!("Failed to write vault metadata: {error}"))
+    atomic_write(path, serialized.as_bytes())
+}
+
+fn unique_trash_path(trash_dir: &Path, target: &Path) -> Result<PathBuf, String> {
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Target entry has no valid file name.".to_string())?;
+    let base = format!("{}.{}", timestamp_ms(), file_name);
+
+    for attempt in 0..100 {
+        let candidate = if attempt == 0 {
+            trash_dir.join(&base)
+        } else {
+            trash_dir.join(format!("{}.{}", base, attempt))
+        };
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err("Failed to choose a unique trash path.".to_string())
 }
 
 fn timestamp_string() -> String {

@@ -1,0 +1,256 @@
+import type { CSSProperties } from "react";
+import { FileText, Folder, FolderOpen, Plus, RotateCcw, Trash2, Edit3 } from "lucide-react";
+import type { LeftPanelTab } from "../../app/store/appStore";
+import type { AppLanguage, appText } from "../../app/i18n";
+import type { VaultTreeEntry } from "../../app/types";
+import type { Note } from "../../domain/model";
+import type { OutlineItem } from "../../shared/markdown";
+import { Button, IconButton, SegmentedTabs, cx } from "../../shared/ui";
+
+type TextBundle = (typeof appText)[AppLanguage];
+
+type VaultSidebarProps = {
+  t: TextBundle;
+  tab: LeftPanelTab;
+  vaultMode: boolean;
+  vaultRoot: string | null;
+  vaultTree: VaultTreeEntry | null;
+  vaultError: string | null;
+  vaultRecoveryBlocked: boolean;
+  expandedDirs: Set<string>;
+  selectedVaultDir: string;
+  activeFilePath: string | null;
+  activeNote: Note;
+  notes: Note[];
+  outline: OutlineItem[];
+  onTabChange: (tab: LeftPanelTab) => void;
+  onDispatchCommand: (commandId: string) => void;
+  onOpenMarkdownFile: (path: string) => void;
+  onVaultError: (message: string | null) => void;
+  onVaultDirectoryClick: (entry: VaultTreeEntry) => void;
+  onRenameVaultEntry: (entry: VaultTreeEntry) => void;
+  onDeleteVaultEntry: (entry: VaultTreeEntry) => void;
+  onClearVaultState: () => void;
+  onOutlineClick: (index: number) => void;
+  onSelectNote: (noteId: string) => void;
+};
+
+function VaultEntry({
+  entry,
+  depth,
+  t,
+  expandedDirs,
+  selectedVaultDir,
+  activeFilePath,
+  onOpenMarkdownFile,
+  onVaultError,
+  onVaultDirectoryClick,
+  onRenameVaultEntry,
+  onDeleteVaultEntry,
+}: {
+  entry: VaultTreeEntry;
+  depth: number;
+  t: TextBundle;
+  expandedDirs: Set<string>;
+  selectedVaultDir: string;
+  activeFilePath: string | null;
+  onOpenMarkdownFile: (path: string) => void;
+  onVaultError: (message: string | null) => void;
+  onVaultDirectoryClick: (entry: VaultTreeEntry) => void;
+  onRenameVaultEntry: (entry: VaultTreeEntry) => void;
+  onDeleteVaultEntry: (entry: VaultTreeEntry) => void;
+}) {
+  const expanded = entry.relativePath === "" || expandedDirs.has(entry.relativePath);
+  const isDirectory = entry.kind === "directory";
+
+  return (
+    <div className="workspace-entry">
+      <div
+        className={cx(
+          "workspace-row",
+          entry.kind,
+          entry.path === activeFilePath && "active",
+          isDirectory && entry.relativePath === selectedVaultDir && "selected",
+        )}
+        style={{ "--tree-depth": depth } as CSSProperties}
+      >
+        <button
+          type="button"
+          className="workspace-name"
+          onClick={() => {
+            if (isDirectory) {
+              onVaultDirectoryClick(entry);
+              return;
+            }
+
+            try {
+              onOpenMarkdownFile(entry.path);
+            } catch (error) {
+              console.error("Failed to open vault file", error);
+              onVaultError(t.errors.openVaultFileFailed);
+            }
+          }}
+        >
+          <span className="workspace-disclosure" aria-hidden="true">
+            {isDirectory ? (entry.loading ? "..." : (expanded ? <FolderOpen size={14} /> : <Folder size={14} />)) : <FileText size={14} />}
+          </span>
+          <span className="workspace-label" title={entry.name}>{entry.name}</span>
+        </button>
+        {entry.relativePath ? (
+          <div className="workspace-actions">
+            <IconButton icon={<Edit3 size={13} />} label={t.prompts.renameAction} onClick={() => onRenameVaultEntry(entry)} />
+            <IconButton icon={<Trash2 size={13} />} label={t.prompts.deleteAction} onClick={() => onDeleteVaultEntry(entry)} />
+          </div>
+        ) : null}
+      </div>
+      {entry.loadError ? (
+        <p className="workspace-entry-note" style={{ "--tree-depth": depth } as CSSProperties}>{entry.loadError}</p>
+      ) : null}
+      {entry.truncated ? (
+        <p className="workspace-entry-note" style={{ "--tree-depth": depth } as CSSProperties}>{t.sidebar.resultLimitReached}</p>
+      ) : null}
+      {isDirectory && expanded && entry.children.length ? (
+        <div className="workspace-children">
+          {entry.children.map((child) => (
+            <VaultEntry
+              key={child.path}
+              entry={child}
+              depth={depth + 1}
+              t={t}
+              expandedDirs={expandedDirs}
+              selectedVaultDir={selectedVaultDir}
+              activeFilePath={activeFilePath}
+              onOpenMarkdownFile={onOpenMarkdownFile}
+              onVaultError={onVaultError}
+              onVaultDirectoryClick={onVaultDirectoryClick}
+              onRenameVaultEntry={onRenameVaultEntry}
+              onDeleteVaultEntry={onDeleteVaultEntry}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function VaultSidebar({
+  t,
+  tab,
+  vaultMode,
+  vaultRoot,
+  vaultTree,
+  vaultError,
+  vaultRecoveryBlocked,
+  expandedDirs,
+  selectedVaultDir,
+  activeFilePath,
+  activeNote,
+  notes,
+  outline,
+  onTabChange,
+  onDispatchCommand,
+  onOpenMarkdownFile,
+  onVaultError,
+  onVaultDirectoryClick,
+  onRenameVaultEntry,
+  onDeleteVaultEntry,
+  onClearVaultState,
+  onOutlineClick,
+  onSelectNote,
+}: VaultSidebarProps) {
+  return (
+    <aside className="left-rail">
+      <SegmentedTabs
+        className="sidebar-tabs"
+        label={t.aria.sidebarSections}
+        value={tab}
+        items={[
+          { id: "files", label: t.sidebar.files },
+          { id: "outline", label: t.sidebar.outline },
+        ]}
+        onChange={onTabChange}
+      />
+
+      {tab === "files" && vaultMode ? (
+        <>
+          <div className="workspace-root" title={vaultRoot ?? ""}>
+            <span>{vaultTree?.name ?? t.sidebar.vault}</span>
+            <Button variant="ghost" onClick={() => onDispatchCommand("file.openVault")}>{t.sidebar.open}</Button>
+          </div>
+          {vaultError ? <p className="workspace-error">{vaultError}</p> : null}
+          <nav className="workspace-tree" aria-label={t.sidebar.vaultFiles}>
+            {vaultTree ? (
+              <VaultEntry
+                entry={vaultTree}
+                depth={0}
+                t={t}
+                expandedDirs={expandedDirs}
+                selectedVaultDir={selectedVaultDir}
+                activeFilePath={activeFilePath}
+                onOpenMarkdownFile={onOpenMarkdownFile}
+                onVaultError={onVaultError}
+                onVaultDirectoryClick={onVaultDirectoryClick}
+                onRenameVaultEntry={onRenameVaultEntry}
+                onDeleteVaultEntry={onDeleteVaultEntry}
+              />
+            ) : (
+              <p className="muted">{t.sidebar.loadingVault}</p>
+            )}
+            {vaultRecoveryBlocked ? (
+              <Button variant="ghost" className="workspace-clear" icon={<RotateCcw size={14} />} onClick={onClearVaultState}>
+                {t.sidebar.clearVaultState}
+              </Button>
+            ) : null}
+          </nav>
+        </>
+      ) : null}
+
+      {tab === "files" && !vaultMode ? (
+        <div className="placeholder-list">
+          <Button variant="primary" icon={<FolderOpen size={15} />} onClick={() => onDispatchCommand("file.openVault")}>{t.sidebar.openLocalFolder}</Button>
+          <Button icon={<FileText size={15} />} onClick={() => onDispatchCommand("file.open")}>{t.sidebar.openStandaloneMarkdown}</Button>
+        </div>
+      ) : null}
+
+      {tab === "outline" ? (
+        <div className="outline-list sidebar-outline" role="tabpanel">
+          {outline.length ? outline.map((item, index) => (
+            <button
+              key={`${item.text}-${index}`}
+              type="button"
+              className={`outline-item level-${item.level}`}
+              onClick={() => onOutlineClick(index)}
+            >
+              {item.text}
+            </button>
+          )) : <p className="muted">{t.sidebar.noHeadings}</p>}
+        </div>
+      ) : null}
+
+      {tab === "files" && !vaultMode ? (
+        <>
+          <div className="panel-heading compact">
+            <span>{t.sidebar.openNotes}</span>
+          </div>
+          <nav className="card-list" aria-label={t.sidebar.openNotes}>
+            {notes.map((note) => (
+              <button
+                key={note.id}
+                type="button"
+                className={note.id === activeNote.id ? "card-item active" : "card-item"}
+                onClick={() => onSelectNote(note.id)}
+              >
+                <strong>{note.title}</strong>
+                <span>{note.filePath ?? note.markdown.split("\n").find((line) => line.trim() && !line.startsWith("#")) ?? t.sidebar.markdownNote}</span>
+              </button>
+            ))}
+          </nav>
+        </>
+      ) : null}
+
+      {tab === "files" ? (
+        <IconButton className="new-note-fab" icon={<Plus size={18} />} label={t.sidebar.newNote} onClick={() => onDispatchCommand("file.new")} />
+      ) : null}
+    </aside>
+  );
+}

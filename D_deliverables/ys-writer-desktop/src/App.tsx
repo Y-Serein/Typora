@@ -1,35 +1,20 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
-  MAX_EDITOR_LEFT_GAP,
-  MAX_RIGHT_PANEL_WIDTH,
-  MAX_SIDEBAR_WIDTH,
-  MAX_UI_SCALE,
-  MIN_EDITOR_LEFT_GAP,
-  MIN_RIGHT_PANEL_WIDTH,
-  MIN_SIDEBAR_WIDTH,
-  MIN_UI_SCALE,
   VAULT_DIRECTORY_LIMIT,
   defaultSettings,
-  settingsSections,
 } from "./app/defaults";
 import { APP_NAME } from "./app/metadata";
-import {
-  appLanguages,
-  appText,
-  editorCjkFontOptions,
-  editorFontSizeOptions,
-  editorLatinFontOptions,
-} from "./app/i18n";
+import { appText } from "./app/i18n";
 import type { AppLanguage } from "./app/i18n";
+import { useAppStore } from "./app/store/appStore";
+import type { AppDialogResult } from "./app/store/appStore";
 import type {
   CommandDefinition,
   EditorMode,
   SaveFileExt,
-  SaveStatus,
-  SettingsSection,
   ThemeStyle,
   UIDensity,
   VaultDirectoryResponse,
@@ -39,28 +24,31 @@ import type {
 import {
   defaultShortcutRegistry,
   findShortcutConflicts,
-  getShortcutForCommand,
-  menuGroups,
   normalizeShortcutList,
-  readShortcuts,
   shortcutFromEvent,
   writeShortcuts,
 } from "./command/shortcuts";
-import type { ShortcutEntry } from "./command/shortcuts";
-import type { EditorCommandAction, EditorCommandSignal, Note } from "./domain/model";
+import type { EditorCommandAction, Note } from "./domain/model";
 import { applyPlainEditorCommand } from "./editor/plainCommands";
 import { directoryFromResponse, updateVaultNode } from "./explorer/tree";
+import { AppDialogHost } from "./features/dialogs/AppDialogHost";
+import { EditorWorkspace } from "./features/editor-workspace/EditorWorkspace";
+import { KnowledgeRail } from "./features/knowledge-rail/KnowledgeRail";
+import { SettingsDialog, resetEditorLayoutDefaults } from "./features/settings/SettingsDialog";
+import { VaultSidebar } from "./features/vault-sidebar/VaultSidebar";
+import { WindowChrome } from "./features/window-chrome/WindowChrome";
 import {
   createVaultEntry,
   deleteVaultEntry,
   initVault,
+  openExternalTarget,
   readMarkdownFile,
   readVaultIndexFiles,
   readVaultDirectory,
   renameVaultEntry,
   writeMarkdownFile,
   writeVaultWorkspaceState,
-} from "./fs/tauriFs";
+} from "./services/files";
 import {
   clampEditorLeftGap,
   clampRightPanelWidth,
@@ -68,39 +56,37 @@ import {
   clampUiScale,
   normalizeDefaultNewNoteName,
   normalizeEditorFontFamily,
-  readSettings,
   writeSettings,
-} from "./settings/storage";
+} from "./services/settings";
 import {
   countDocumentText,
   ensureSaveExtension,
   extractFirstLineTitle,
   extractOutline,
-  formatTime,
   getHeadingOffsets,
   isSameOrChildPath,
   joinVaultPath,
   normalizeFilePath,
   parentVaultDir,
+  pathExtension,
   pathFileName,
   stripExtension,
   vaultFileNameCandidate,
 } from "./shared/markdown";
-import { buildVaultIndex, createLocalGraph, findIndexedFile, getBacklinks } from "./vault/index";
-import type { VaultIndex } from "./vault/index";
+import { buildVaultIndex, createDraftIndexedFile, createLocalGraph, findIndexedFile, getBacklinks } from "./vault/index";
 import {
   createDraftNote,
+  createEmptyNote,
   createFileNote,
   isEmptyDraft,
+  isEmptyPlaceholder,
   mergeWorkspaceState,
   nextWorkspaceState,
   pushRecentFile,
 } from "./vault/workspace";
 import "./styles.css";
 
-const MilkdownEditor = lazy(() => import("./components/MilkdownEditor").then((module) => ({
-  default: module.MilkdownEditor,
-})));
+const DIRECTORY_INDEX_FILE_NAMES = ["index.md", "index.markdown", "index.txt", "readme.md", "readme.markdown", "readme.txt"];
 
 function isEditorTarget(target: EventTarget | null) {
   return target instanceof HTMLElement
@@ -114,8 +100,8 @@ function selectRichCodeBlockDom(target: EventTarget | null) {
     ? selection.anchorNode
     : selection.anchorNode?.parentElement;
   const eventElement = target instanceof HTMLElement ? target : null;
-  const codeBlock = eventElement?.closest<HTMLElement>(".milkdown pre code, .milkdown pre")
-    ?? anchorElement?.closest<HTMLElement>(".milkdown pre code, .milkdown pre");
+  const codeBlock = eventElement?.closest<HTMLElement>(".milkdown-code-block .cm-content, .milkdown-code-block, .milkdown pre code, .milkdown pre")
+    ?? anchorElement?.closest<HTMLElement>(".milkdown-code-block .cm-content, .milkdown-code-block, .milkdown pre code, .milkdown pre");
 
   if (!codeBlock) return false;
 
@@ -144,105 +130,246 @@ function quoteCssFontFamily(fontFamily: string) {
   return `"${fontFamily.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
 
-type LeftPanelTab = "files" | "outline";
-type KnowledgePanelTab = "backlinks" | "graph";
-type VaultIndexStatus = "idle" | "indexing" | "ready" | "error";
-type AppDialog = {
-  id: number;
-  kind: "input" | "confirm" | "alert";
-  title: string;
-  message?: string;
-  confirmLabel: string;
-  cancelLabel?: string;
-  danger?: boolean;
-};
-type AppDialogResult = string | boolean | null;
+function normalizeVaultRelativePath(path: string) {
+  return path
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/+$/, "");
+}
+
+function stripLinkTargetMeta(target: string) {
+  return target.split("#", 1)[0].split("?", 1)[0].trim();
+}
+
+function normalizeMarkdownHrefTarget(href: string) {
+  const trimmed = href.trim().replace(/^<|>$/g, "");
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function isExternalHrefTarget(target: string) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#");
+}
+
+function isBrowserHrefTarget(target: string) {
+  return /^(https?:|mailto:)/i.test(target);
+}
+
+function isFileHrefTarget(target: string) {
+  return /^file:/i.test(target);
+}
+
+function isMarkdownLikePath(path: string) {
+  const extension = pathExtension(path);
+  return extension === "md" || extension === "markdown" || extension === "txt";
+}
+
+function filePathDirectory(path: string) {
+  const normalized = normalizeFilePath(path);
+  const index = normalized.lastIndexOf("/");
+  return index > -1 ? normalized.slice(0, index) : "";
+}
+
+function joinAbsolutePath(directory: string, target: string) {
+  if (/^[A-Za-z]:[\\/]/.test(target) || target.startsWith("/")) return normalizeFilePath(target);
+  if (target.startsWith("file://")) {
+    try {
+      return normalizeFilePath(decodeURIComponent(new URL(target).pathname));
+    } catch {
+      return normalizeFilePath(target.replace(/^file:\/\//i, ""));
+    }
+  }
+
+  const parts = [...normalizeFilePath(directory).split("/"), ...normalizeFilePath(target).split("/")]
+    .filter(Boolean);
+  const output: string[] = [];
+
+  for (const part of parts) {
+    if (part === ".") continue;
+    if (part === "..") {
+      output.pop();
+      continue;
+    }
+    output.push(part);
+  }
+
+  const prefix = directory.startsWith("/") ? "/" : "";
+  return `${prefix}${output.join("/")}`;
+}
+
+function joinRelativeVaultPath(directory: string, target: string) {
+  const parts = [...normalizeVaultRelativePath(directory).split("/"), ...normalizeVaultRelativePath(target).split("/")]
+    .filter(Boolean);
+  const output: string[] = [];
+
+  for (const part of parts) {
+    if (part === ".") continue;
+    if (part === "..") {
+      output.pop();
+      continue;
+    }
+    output.push(part);
+  }
+
+  return output.join("/");
+}
+
+function isAbsoluteLocalPath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || isFileHrefTarget(path);
+}
+
+function localPathFromHrefTarget(target: string) {
+  if (!isFileHrefTarget(target)) return normalizeFilePath(target);
+
+  try {
+    const url = new URL(target);
+    const pathname = decodeURIComponent(url.pathname);
+    return normalizeFilePath(pathname.replace(/^\/([A-Za-z]:\/)/, "$1"));
+  } catch {
+    return normalizeFilePath(target.replace(/^file:\/\//i, ""));
+  }
+}
+
+function relativePathFromRoot(root: string, path: string) {
+  const normalizedRoot = normalizeFilePath(root);
+  const normalizedPath = normalizeFilePath(path);
+  if (normalizedPath === normalizedRoot) return "";
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return null;
+  return normalizedPath.slice(normalizedRoot.length + 1);
+}
 
 export default function App() {
-  const [initialSettings] = useState(readSettings);
-  const [initialShortcuts] = useState(readShortcuts);
-  const [notes, setNotes] = useState<Note[]>(() => [createDraftNote()]);
-  const [activeNoteId, setActiveNoteId] = useState(notes[0]?.id ?? "");
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [editorMode, setEditorMode] = useState<EditorMode>(initialSettings.defaultEditorMode);
-  const [language, setLanguage] = useState<AppLanguage>(initialSettings.language);
-  const [theme, setTheme] = useState<ThemeStyle>(initialSettings.theme);
-  const [uiDensity, setUiDensity] = useState<UIDensity>(initialSettings.uiDensity);
-  const [sidebarWidth, setSidebarWidth] = useState(initialSettings.sidebarWidth);
-  const [sidebarVisible, setSidebarVisible] = useState(initialSettings.sidebarVisible);
-  const [rightPanelVisible, setRightPanelVisible] = useState(initialSettings.rightPanelVisible);
-  const [rightPanelWidth, setRightPanelWidth] = useState(initialSettings.rightPanelWidth);
-  const [vaultRoot, setVaultRoot] = useState<string | null>(initialSettings.restoreWorkspace ? initialSettings.vaultRoot : null);
-  const [vaultTree, setVaultTree] = useState<VaultTreeEntry | null>(null);
-  const [vaultError, setVaultError] = useState<string | null>(null);
-  const [vaultIndex, setVaultIndex] = useState<VaultIndex | null>(null);
-  const [vaultIndexStatus, setVaultIndexStatus] = useState<VaultIndexStatus>("idle");
-  const [vaultIndexError, setVaultIndexError] = useState<string | null>(null);
-  const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>("files");
-  const [knowledgePanelTab, setKnowledgePanelTab] = useState<KnowledgePanelTab>("backlinks");
-  const [knowledgePanelFloating, setKnowledgePanelFloating] = useState(false);
-  const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 920, y: 112 });
-  const [selectedVaultDir, setSelectedVaultDir] = useState(initialSettings.selectedVaultDir);
-  const [lastOpenedFile, setLastOpenedFile] = useState<string | null>(initialSettings.lastOpenedFile);
-  const [vaultRecoveryBlocked, setVaultRecoveryBlocked] = useState(initialSettings.vaultRecoveryBlocked);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set([""]));
-  const [vaultWorkspace, setVaultWorkspace] = useState<VaultWorkspaceState>(() => mergeWorkspaceState(null, {
-    sidebarWidth: initialSettings.sidebarWidth,
-    sidebarVisible: initialSettings.sidebarVisible,
-    rightPanelVisible: initialSettings.rightPanelVisible,
-    rightPanelWidth: initialSettings.rightPanelWidth,
-    editorLeftGap: initialSettings.editorLeftGap,
-    uiScale: initialSettings.uiScale,
-  }));
-  const [defaultEditorModeSetting, setDefaultEditorModeSetting] = useState<EditorMode>(initialSettings.defaultEditorMode);
-  const [restoreWorkspace, setRestoreWorkspace] = useState(initialSettings.restoreWorkspace);
-  const [editorLatinFont, setEditorLatinFont] = useState(initialSettings.editorLatinFont);
-  const [editorCjkFont, setEditorCjkFont] = useState(initialSettings.editorCjkFont);
-  const [editorFontSize, setEditorFontSize] = useState(initialSettings.editorFontSize);
-  const [editorLineHeight, setEditorLineHeight] = useState(initialSettings.editorLineHeight);
-  const [editorLeftGap, setEditorLeftGap] = useState(initialSettings.editorLeftGap);
-  const [uiScale, setUiScale] = useState(initialSettings.uiScale);
-  const [zoomWithWheel, setZoomWithWheel] = useState(initialSettings.zoomWithWheel);
-  const [richCommand, setRichCommand] = useState<EditorCommandSignal | null>(null);
-  const [defaultSaveExt, setDefaultSaveExt] = useState<SaveFileExt>(initialSettings.defaultSaveExt);
-  const [defaultNewNoteName, setDefaultNewNoteName] = useState(initialSettings.defaultNewNoteName);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
-  const [appDialog, setAppDialog] = useState<AppDialog | null>(null);
-  const [appDialogInput, setAppDialogInput] = useState("");
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const [shortcuts, setShortcuts] = useState<ShortcutEntry[]>(initialShortcuts);
-  const [shortcutEdits, setShortcutEdits] = useState<Record<string, string>>(
-    () => Object.fromEntries(initialShortcuts.map((shortcut) => [shortcut.id, shortcut.currentKeys.join(", ")])),
-  );
+  const store = useAppStore();
+  const {
+    notes,
+    setNotes,
+    activeNoteId,
+    setActiveNoteId,
+    savedAt,
+    setSavedAt,
+    saveError,
+    setSaveError,
+    saveStatus,
+    setSaveStatus,
+    editorMode,
+    setEditorMode,
+    language,
+    setLanguage,
+    theme,
+    setTheme,
+    uiDensity,
+    setUiDensity,
+    sidebarWidth,
+    setSidebarWidth,
+    sidebarVisible,
+    setSidebarVisible,
+    rightPanelVisible,
+    setRightPanelVisible,
+    rightPanelWidth,
+    setRightPanelWidth,
+    vaultRoot,
+    setVaultRoot,
+    vaultTree,
+    setVaultTree,
+    vaultError,
+    setVaultError,
+    vaultIndex,
+    setVaultIndex,
+    vaultIndexStatus,
+    setVaultIndexStatus,
+    vaultIndexError,
+    setVaultIndexError,
+    leftPanelTab,
+    setLeftPanelTab,
+    knowledgePanelTab,
+    setKnowledgePanelTab,
+    knowledgePanelFloating,
+    setKnowledgePanelFloating,
+    floatingPanelPosition,
+    setFloatingPanelPosition,
+    selectedVaultDir,
+    setSelectedVaultDir,
+    lastOpenedFile,
+    setLastOpenedFile,
+    vaultRecoveryBlocked,
+    setVaultRecoveryBlocked,
+    expandedDirs,
+    setExpandedDirs,
+    vaultWorkspace,
+    setVaultWorkspace,
+    defaultEditorModeSetting,
+    setDefaultEditorModeSetting,
+    restoreWorkspace,
+    setRestoreWorkspace,
+    editorLatinFont,
+    setEditorLatinFont,
+    editorCjkFont,
+    setEditorCjkFont,
+    editorFontSize,
+    setEditorFontSize,
+    editorLineHeight,
+    setEditorLineHeight,
+    editorLeftGap,
+    setEditorLeftGap,
+    uiScale,
+    setUiScale,
+    zoomWithWheel,
+    setZoomWithWheel,
+    richCommand,
+    setRichCommand,
+    defaultSaveExt,
+    setDefaultSaveExt,
+    defaultNewNoteName,
+    setDefaultNewNoteName,
+    settingsOpen,
+    setSettingsOpen,
+    settingsSection,
+    setSettingsSection,
+    appDialog,
+    setAppDialog,
+    appDialogInput,
+    setAppDialogInput,
+    openMenuId,
+    setOpenMenuId,
+    shortcuts,
+    setShortcuts,
+    shortcutEdits,
+    setShortcutEdits,
+  } = store;
   const menuBarRef = useRef<HTMLElement | null>(null);
   const appDialogInputRef = useRef<HTMLInputElement | null>(null);
   const appDialogResolverRef = useRef<((value: AppDialogResult) => void) | null>(null);
   const editorSurfaceRef = useRef<HTMLElement | null>(null);
   const plainEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const restoredVaultRef = useRef(false);
+  const restoredStandaloneFileRef = useRef(false);
   const richCommandIdRef = useRef(0);
   const vaultIndexRefreshIdRef = useRef(0);
   const windowActionPendingRef = useRef(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const activeNote = notes.find((note) => note.id === activeNoteId) ?? notes[0];
   const t = appText[language];
+  const hasActiveDocument = !isEmptyPlaceholder(activeNote);
   const outline = useMemo(() => extractOutline(activeNote.markdown), [activeNote.markdown]);
-  const activeIndexedFile = useMemo(() => findIndexedFile(vaultIndex, activeNote.filePath), [activeNote.filePath, vaultIndex]);
+  const persistedActiveIndexedFile = useMemo(() => findIndexedFile(vaultIndex, activeNote.filePath), [activeNote.filePath, vaultIndex]);
+  const activeIndexedFile = useMemo(() => (
+    createDraftIndexedFile(vaultIndex, activeNote.filePath, activeNote.markdown) ?? persistedActiveIndexedFile
+  ), [activeNote.filePath, activeNote.markdown, persistedActiveIndexedFile, vaultIndex]);
   const activeBacklinks = useMemo(() => getBacklinks(vaultIndex, activeNote.filePath), [activeNote.filePath, vaultIndex]);
   const activeOutgoingLinks = activeIndexedFile?.outgoingLinks ?? [];
   const activeResolvedLinks = activeOutgoingLinks.filter((link) => link.targetPath);
   const activeUnresolvedLinks = activeOutgoingLinks.filter((link) => !link.targetPath);
-  const localGraph = useMemo(() => createLocalGraph(vaultIndex, activeNote.filePath), [activeNote.filePath, vaultIndex]);
-  const localGraphNodeMap = useMemo(
-    () => new Map(localGraph.nodes.map((node) => [normalizeFilePath(node.path), node])),
-    [localGraph.nodes],
-  );
+  const localGraph = useMemo(() => createLocalGraph(vaultIndex, activeNote.filePath, activeIndexedFile), [activeIndexedFile, activeNote.filePath, vaultIndex]);
   const shortcutConflicts = useMemo(() => findShortcutConflicts(shortcuts), [shortcuts]);
   const vaultMode = Boolean(vaultRoot);
-  const windowTitle = `${activeNote.dirty ? "● " : ""}${activeNote.fileName ?? activeNote.title} — ${APP_NAME}`;
+  const windowTitle = hasActiveDocument
+    ? `${activeNote.dirty ? "● " : ""}${activeNote.fileName ?? activeNote.title} — ${APP_NAME}`
+    : APP_NAME;
   const textStats = useMemo(() => countDocumentText(activeNote.markdown), [activeNote.markdown]);
   const lineCount = useMemo(() => activeNote.markdown.split(/\r?\n/).length, [activeNote.markdown]);
 
@@ -273,7 +400,7 @@ export default function App() {
     })
   ), [t.dialog.cancel, t.dialog.ok]);
 
-  const showConfirmDialog = useCallback((title: string, message: string, danger = false) => (
+  const showConfirmDialog = useCallback((title: string, message: string, danger = false, confirmLabel?: string) => (
     new Promise<boolean>((resolve) => {
       appDialogResolverRef.current = (value) => resolve(value === true);
       setAppDialog({
@@ -281,7 +408,7 @@ export default function App() {
         kind: "confirm",
         title,
         message,
-        confirmLabel: danger ? t.dialog.deleteConfirm : t.dialog.confirm,
+        confirmLabel: confirmLabel ?? (danger ? t.dialog.deleteConfirm : t.dialog.confirm),
         cancelLabel: t.dialog.cancel,
         danger,
       });
@@ -301,6 +428,11 @@ export default function App() {
     })
   ), [t.dialog.close]);
 
+  const confirmDiscardUnsavedChanges = useCallback(async () => {
+    if (!notes.some((note) => note.dirty)) return true;
+    return showConfirmDialog(t.prompts.unsavedChangesTitle, t.prompts.unsavedChangesMessage, true, t.dialog.confirm);
+  }, [notes, showConfirmDialog, t.dialog.confirm, t.prompts.unsavedChangesMessage, t.prompts.unsavedChangesTitle]);
+
   const handleWindowAction = useCallback((action: "minimize" | "maximize" | "close") => {
     const run = async () => {
       if (windowActionPendingRef.current) return;
@@ -317,16 +449,27 @@ export default function App() {
             await currentWindow.maximize();
           }
         }
-        if (action === "close") await currentWindow.close();
+        if (action === "close") {
+          setOpenMenuId(null);
+          setSettingsOpen(false);
+          if (!await confirmDiscardUnsavedChanges()) return;
+          await currentWindow.close();
+          window.setTimeout(() => {
+            currentWindow.destroy().catch((error) => {
+              console.warn("Window destroy fallback failed", error);
+            });
+          }, 180);
+        }
       } catch (error) {
         console.warn("Window action is only available inside Tauri", error);
+        if (action === "close") setToastMessage(t.status.closeFailed);
       } finally {
         windowActionPendingRef.current = false;
       }
     };
 
     void run();
-  }, []);
+  }, [confirmDiscardUnsavedChanges, setOpenMenuId, setSettingsOpen, t.status.closeFailed]);
 
   const handleChromeDragMouseDown = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (event.button !== 0 || event.detail > 1) return;
@@ -478,26 +621,29 @@ export default function App() {
     setSaveStatus("saved");
   }, [activeNote, persistVaultPatch, vaultRoot, vaultWorkspace.recentFiles]);
 
-  const openMarkdownFile = useCallback(async (path: string) => {
+  const openMarkdownFile = useCallback(async (path: string, options: { skipUnsavedCheck?: boolean } = {}) => {
+    const currentPath = activeNote.filePath ? normalizeFilePath(activeNote.filePath) : null;
+    if (!options.skipUnsavedCheck && normalizeFilePath(path) !== currentPath && !await confirmDiscardUnsavedChanges()) return;
     const file = await readMarkdownFile(path);
     applyOpenedFile(file);
-  }, [applyOpenedFile]);
+  }, [activeNote.filePath, applyOpenedFile, confirmDiscardUnsavedChanges]);
 
   const handleOpenFile = useCallback(async () => {
     try {
+      if (!await confirmDiscardUnsavedChanges()) return;
       const selected = await open({
         multiple: false,
         filters: [{ name: "Markdown/Text", extensions: ["md", "markdown", "txt"] }],
       });
 
       if (!selected || Array.isArray(selected)) return;
-      await openMarkdownFile(selected);
+      await openMarkdownFile(selected, { skipUnsavedCheck: true });
     } catch (error) {
       console.error("Failed to open file", error);
       setSaveError(t.errors.openFileFailed);
       setSaveStatus("error");
     }
-  }, [openMarkdownFile, t.errors.openFileFailed]);
+  }, [confirmDiscardUnsavedChanges, openMarkdownFile, t.errors.openFileFailed]);
 
   const activateVault = useCallback(async (root: string) => {
     const initialized = await initVault(root);
@@ -522,9 +668,9 @@ export default function App() {
     setUiScale(clampUiScale(workspace.layout.uiScale));
     setVaultRecoveryBlocked(false);
     setExpandedDirs(new Set(workspace.expandedDirs.length ? workspace.expandedDirs : [""]));
-    const draft = createDraftNote();
-    setNotes([draft]);
-    setActiveNoteId(draft.id);
+    const emptyNote = createEmptyNote();
+    setNotes([emptyNote]);
+    setActiveNoteId(emptyNote.id);
 
     const rootDirectory = await loadVaultDirectory("", initialized.root);
     void refreshVaultIndex(initialized.root);
@@ -551,6 +697,7 @@ export default function App() {
 
   const handleOpenVault = useCallback(async () => {
     try {
+      if (!await confirmDiscardUnsavedChanges()) return;
       const selected = await open({ directory: true, multiple: false });
       if (!selected || Array.isArray(selected)) return;
       await activateVault(selected);
@@ -558,17 +705,27 @@ export default function App() {
       console.error("Failed to open vault", error);
       setVaultError(t.errors.openVaultFailed);
     }
-  }, [activateVault, t.errors.openVaultFailed]);
+  }, [activateVault, confirmDiscardUnsavedChanges, t.errors.openVaultFailed]);
 
   const saveNoteToPath = useCallback(async (note: Note, path: string) => {
     const normalizedPath = ensureSaveExtension(path, defaultSaveExt);
-    const file = await writeMarkdownFile(normalizedPath, note.markdown);
+    const isExistingFileSave = note.filePath
+      ? normalizeFilePath(normalizedPath) === normalizeFilePath(note.filePath)
+      : false;
+    const file = await writeMarkdownFile(
+      normalizedPath,
+      note.markdown,
+      isExistingFileSave ? note.fileModifiedAtMs : null,
+      isExistingFileSave ? note.fileSize : null,
+    );
     const nextNote: Note = {
       ...note,
       title: stripExtension(file.fileName) || extractFirstLineTitle(note.markdown) || note.title,
       filePath: file.path,
       fileName: file.fileName,
       fileExt: file.fileExt,
+      fileModifiedAtMs: file.modifiedAtMs,
+      fileSize: file.size,
       updatedAt: new Date().toISOString(),
       dirty: false,
     };
@@ -659,8 +816,9 @@ export default function App() {
     vaultRoot,
   ]);
 
-  const handleCreateNote = useCallback(() => {
+  const handleCreateNote = useCallback(async () => {
     if (vaultRoot) {
+      if (!await confirmDiscardUnsavedChanges()) return;
       createVaultNoteFromDefaultName()
         .catch((error) => {
           console.error("Failed to create vault file", error);
@@ -672,7 +830,7 @@ export default function App() {
     const note = createDraftNote(defaultNewNoteName, defaultSaveExt);
     setNotes((currentNotes) => [note, ...currentNotes]);
     setActiveNoteId(note.id);
-  }, [createVaultNoteFromDefaultName, defaultNewNoteName, defaultSaveExt, t.errors.createFileFailed, vaultRoot]);
+  }, [confirmDiscardUnsavedChanges, createVaultNoteFromDefaultName, defaultNewNoteName, defaultSaveExt, t.errors.createFileFailed, vaultRoot]);
 
   const handleCreateVaultFolder = useCallback(async () => {
     if (!vaultRoot) return;
@@ -731,9 +889,9 @@ export default function App() {
         await loadVaultDirectory(parentVaultDir(entry.relativePath));
         await refreshVaultIndex(vaultRoot);
         if (isSameOrChildPath(activeNote.filePath, entry.path)) {
-          const note = createDraftNote();
-          setNotes([note]);
-          setActiveNoteId(note.id);
+          const emptyNote = createEmptyNote();
+          setNotes([emptyNote]);
+          setActiveNoteId(emptyNote.id);
           setLastOpenedFile(null);
           persistVaultPatch({ lastOpenedFile: null });
         }
@@ -837,9 +995,9 @@ export default function App() {
     "file.newFolder": { id: "file.newFolder", label: t.commandLabels["file.newFolder"], enabled: Boolean(vaultRoot), run: handleCreateVaultFolder },
     "file.open": { id: "file.open", label: t.commandLabels["file.open"], enabled: true, run: handleOpenFile },
     "file.openVault": { id: "file.openVault", label: t.commandLabels["file.openVault"], enabled: true, run: handleOpenVault },
-    "file.save": { id: "file.save", label: t.commandLabels["file.save"], enabled: Boolean(activeNote), run: handleSave },
-    "file.saveAs": { id: "file.saveAs", label: t.commandLabels["file.saveAs"], enabled: Boolean(activeNote), run: handleSaveAs },
-    "file.export": { id: "file.export", label: t.commandLabels["file.export"], enabled: Boolean(activeNote), run: handleSaveAs },
+    "file.save": { id: "file.save", label: t.commandLabels["file.save"], enabled: hasActiveDocument, run: handleSave },
+    "file.saveAs": { id: "file.saveAs", label: t.commandLabels["file.saveAs"], enabled: hasActiveDocument, run: handleSaveAs },
+    "file.export": { id: "file.export", label: t.commandLabels["file.export"], enabled: hasActiveDocument, run: handleSaveAs },
     "app.openSettings": {
       id: "app.openSettings",
       label: t.commandLabels["app.openSettings"],
@@ -865,20 +1023,20 @@ export default function App() {
     "edit.undo": { id: "edit.undo", label: t.commandLabels["edit.undo"], enabled: true, run: () => { focusEditor(); document.execCommand("undo"); } },
     "edit.redo": { id: "edit.redo", label: t.commandLabels["edit.redo"], enabled: true, run: () => { focusEditor(); document.execCommand("redo"); } },
     "edit.selectAll": { id: "edit.selectAll", label: t.commandLabels["edit.selectAll"], enabled: true, run: () => runEditorCommand("selectAllSmart") },
-    "edit.find": { id: "edit.find", label: t.commandLabels["edit.find"], enabled: Boolean(activeNote), run: handleFind },
-    "paragraph.text": { id: "paragraph.text", label: t.commandLabels["paragraph.text"], enabled: Boolean(activeNote), run: () => runEditorCommand("paragraph") },
-    "paragraph.heading1": { id: "paragraph.heading1", label: t.commandLabels["paragraph.heading1"], enabled: Boolean(activeNote), run: () => runEditorCommand("heading1") },
-    "paragraph.heading2": { id: "paragraph.heading2", label: t.commandLabels["paragraph.heading2"], enabled: Boolean(activeNote), run: () => runEditorCommand("heading2") },
-    "paragraph.heading3": { id: "paragraph.heading3", label: t.commandLabels["paragraph.heading3"], enabled: Boolean(activeNote), run: () => runEditorCommand("heading3") },
-    "paragraph.blockquote": { id: "paragraph.blockquote", label: t.commandLabels["paragraph.blockquote"], enabled: Boolean(activeNote), run: () => runEditorCommand("blockquote") },
-    "paragraph.bulletList": { id: "paragraph.bulletList", label: t.commandLabels["paragraph.bulletList"], enabled: Boolean(activeNote), run: () => runEditorCommand("bulletList") },
-    "paragraph.orderedList": { id: "paragraph.orderedList", label: t.commandLabels["paragraph.orderedList"], enabled: Boolean(activeNote), run: () => runEditorCommand("orderedList") },
-    "paragraph.codeBlock": { id: "paragraph.codeBlock", label: t.commandLabels["paragraph.codeBlock"], enabled: Boolean(activeNote), run: () => runEditorCommand("codeBlock") },
-    "format.bold": { id: "format.bold", label: t.commandLabels["format.bold"], enabled: Boolean(activeNote), run: () => runEditorCommand("bold") },
-    "format.italic": { id: "format.italic", label: t.commandLabels["format.italic"], enabled: Boolean(activeNote), run: () => runEditorCommand("italic") },
-    "format.inlineCode": { id: "format.inlineCode", label: t.commandLabels["format.inlineCode"], enabled: Boolean(activeNote), run: () => runEditorCommand("inlineCode") },
-    "format.strike": { id: "format.strike", label: t.commandLabels["format.strike"], enabled: Boolean(activeNote), run: () => runEditorCommand("strike") },
-    "format.link": { id: "format.link", label: t.commandLabels["format.link"], enabled: Boolean(activeNote), run: runLinkCommand },
+    "edit.find": { id: "edit.find", label: t.commandLabels["edit.find"], enabled: hasActiveDocument, run: handleFind },
+    "paragraph.text": { id: "paragraph.text", label: t.commandLabels["paragraph.text"], enabled: hasActiveDocument, run: () => runEditorCommand("paragraph") },
+    "paragraph.heading1": { id: "paragraph.heading1", label: t.commandLabels["paragraph.heading1"], enabled: hasActiveDocument, run: () => runEditorCommand("heading1") },
+    "paragraph.heading2": { id: "paragraph.heading2", label: t.commandLabels["paragraph.heading2"], enabled: hasActiveDocument, run: () => runEditorCommand("heading2") },
+    "paragraph.heading3": { id: "paragraph.heading3", label: t.commandLabels["paragraph.heading3"], enabled: hasActiveDocument, run: () => runEditorCommand("heading3") },
+    "paragraph.blockquote": { id: "paragraph.blockquote", label: t.commandLabels["paragraph.blockquote"], enabled: hasActiveDocument, run: () => runEditorCommand("blockquote") },
+    "paragraph.bulletList": { id: "paragraph.bulletList", label: t.commandLabels["paragraph.bulletList"], enabled: hasActiveDocument, run: () => runEditorCommand("bulletList") },
+    "paragraph.orderedList": { id: "paragraph.orderedList", label: t.commandLabels["paragraph.orderedList"], enabled: hasActiveDocument, run: () => runEditorCommand("orderedList") },
+    "paragraph.codeBlock": { id: "paragraph.codeBlock", label: t.commandLabels["paragraph.codeBlock"], enabled: hasActiveDocument, run: () => runEditorCommand("codeBlock") },
+    "format.bold": { id: "format.bold", label: t.commandLabels["format.bold"], enabled: hasActiveDocument, run: () => runEditorCommand("bold") },
+    "format.italic": { id: "format.italic", label: t.commandLabels["format.italic"], enabled: hasActiveDocument, run: () => runEditorCommand("italic") },
+    "format.inlineCode": { id: "format.inlineCode", label: t.commandLabels["format.inlineCode"], enabled: hasActiveDocument, run: () => runEditorCommand("inlineCode") },
+    "format.strike": { id: "format.strike", label: t.commandLabels["format.strike"], enabled: hasActiveDocument, run: () => runEditorCommand("strike") },
+    "format.link": { id: "format.link", label: t.commandLabels["format.link"], enabled: hasActiveDocument, run: runLinkCommand },
     "view.setPlainEdit": { id: "view.setPlainEdit", label: t.commandLabels["view.setPlainEdit"], enabled: editorMode !== "plain", run: () => setEditorMode("plain") },
     "view.setRichEdit": { id: "view.setRichEdit", label: t.commandLabels["view.setRichEdit"], enabled: editorMode !== "rich", run: () => setEditorMode("rich") },
     "view.toggleSidebar": { id: "view.toggleSidebar", label: t.commandLabels["view.toggleSidebar"], enabled: true, run: () => setSidebarVisible((visible) => !visible) },
@@ -891,6 +1049,7 @@ export default function App() {
     activeNote,
     editorMode,
     focusEditor,
+    hasActiveDocument,
     handleCreateVaultFolder,
     handleCreateNote,
     handleFind,
@@ -940,6 +1099,17 @@ export default function App() {
       setVaultRecoveryBlocked(true);
     });
   }, [activateVault, t.errors.recoveryPaused, t.errors.recoveryPausedLabel, t.errors.restoreVaultFailed, vaultRecoveryBlocked, vaultRoot]);
+
+  useEffect(() => {
+    if (restoredStandaloneFileRef.current || vaultRoot || !restoreWorkspace || !lastOpenedFile) return;
+    restoredStandaloneFileRef.current = true;
+
+    openMarkdownFile(lastOpenedFile, { skipUnsavedCheck: true }).catch((error) => {
+      console.error("Failed to restore last opened file", error);
+      setSaveError(t.errors.restoreLastFileFailed);
+      setSaveStatus("error");
+    });
+  }, [lastOpenedFile, openMarkdownFile, restoreWorkspace, t.errors.restoreLastFileFailed, vaultRoot]);
 
   useEffect(() => {
     writeSettings({
@@ -994,6 +1164,12 @@ export default function App() {
   useEffect(() => {
     writeShortcuts(shortcuts);
   }, [shortcuts]);
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timeout = window.setTimeout(() => setToastMessage(null), 2600);
+    return () => window.clearTimeout(timeout);
+  }, [toastMessage]);
 
   useEffect(() => {
     if (!appDialog || appDialog.kind !== "input") return undefined;
@@ -1155,6 +1331,91 @@ export default function App() {
     });
   }, [openMarkdownFile, t.errors.openGraphNodeFailed, vaultIndex]);
 
+  const showLinkOpenFailedToast = useCallback(() => {
+    setToastMessage(t.status.linkOpenFailed);
+  }, [t.status.linkOpenFailed]);
+
+  const handleEditorLinkOpen = useCallback((href: string) => {
+    const target = normalizeMarkdownHrefTarget(href);
+    if (!target) return false;
+
+    if (target.startsWith("#")) {
+      showLinkOpenFailedToast();
+      return true;
+    }
+
+    const targetPath = stripLinkTargetMeta(target);
+    if (!targetPath) {
+      showLinkOpenFailedToast();
+      return true;
+    }
+
+    if ((isBrowserHrefTarget(target) || isExternalHrefTarget(target)) && !isFileHrefTarget(target)) {
+      openExternalTarget(target).catch((error) => {
+        console.error("Failed to open external editor link", error);
+        showLinkOpenFailedToast();
+      });
+      return true;
+    }
+
+    if (!activeNote.filePath) {
+      showLinkOpenFailedToast();
+      return true;
+    }
+
+    const cleanLocalTarget = localPathFromHrefTarget(targetPath);
+    const sourceDir = filePathDirectory(activeNote.filePath);
+    const absoluteTarget = isAbsoluteLocalPath(cleanLocalTarget)
+      ? localPathFromHrefTarget(cleanLocalTarget)
+      : joinAbsolutePath(sourceDir, cleanLocalTarget);
+
+    let indexedTarget = null as ReturnType<typeof findIndexedFile> | null;
+    if (vaultIndex) {
+      const sourceFile = vaultIndex.filesByPath.get(normalizeFilePath(activeNote.filePath));
+      const sourceVaultDir = sourceFile ? parentVaultDir(sourceFile.relativePath) : "";
+      const absoluteVaultRelative = vaultRoot ? relativePathFromRoot(vaultRoot, absoluteTarget) : null;
+      const relativeTarget = absoluteVaultRelative
+        ?? (isAbsoluteLocalPath(cleanLocalTarget) ? null : joinRelativeVaultPath(sourceVaultDir, cleanLocalTarget));
+      if (!relativeTarget) {
+        indexedTarget = null;
+      } else {
+        const normalizedTarget = normalizeVaultRelativePath(relativeTarget).toLowerCase();
+
+        const directFile = vaultIndex.filesByRelativePath.get(normalizedTarget)
+          ?? vaultIndex.files.find((file) => stripExtension(normalizeVaultRelativePath(file.relativePath)).toLowerCase() === stripExtension(normalizedTarget));
+
+        const directoryFile = DIRECTORY_INDEX_FILE_NAMES
+          .map((fileName) => normalizeVaultRelativePath(normalizedTarget ? `${normalizedTarget}/${fileName}` : fileName).toLowerCase())
+          .map((candidate) => vaultIndex.filesByRelativePath.get(candidate))
+          .find(Boolean);
+
+        indexedTarget = directFile ?? directoryFile ?? null;
+      }
+    }
+
+    if (indexedTarget) {
+      openMarkdownFile(indexedTarget.path).catch((error) => {
+        console.error("Failed to open indexed editor link", error);
+        showLinkOpenFailedToast();
+      });
+      return true;
+    }
+
+    if (isMarkdownLikePath(absoluteTarget)) {
+      openMarkdownFile(absoluteTarget).catch((error) => {
+        console.error("Failed to open local markdown editor link", error);
+        showLinkOpenFailedToast();
+      });
+      return true;
+    }
+
+    openExternalTarget(absoluteTarget).catch((error) => {
+      console.error("Failed to open local editor link", error);
+      showLinkOpenFailedToast();
+    });
+    return true;
+  }, [activeNote.filePath, openMarkdownFile, showLinkOpenFailedToast, vaultIndex, vaultRoot]);
+
   const handleFloatingPanelPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     if (event.target instanceof HTMLElement && event.target.closest("button")) return;
@@ -1265,7 +1526,8 @@ export default function App() {
     )));
   }, []);
 
-  const clearVaultState = useCallback(() => {
+  const clearVaultState = useCallback(async (options: { skipUnsavedCheck?: boolean } = {}) => {
+    if (!options.skipUnsavedCheck && !await confirmDiscardUnsavedChanges()) return;
     setVaultRoot(null);
     setVaultTree(null);
     setVaultError(null);
@@ -1276,11 +1538,11 @@ export default function App() {
     setSelectedVaultDir("");
     setLastOpenedFile(null);
     setExpandedDirs(new Set([""]));
-    const note = createDraftNote();
-    setNotes([note]);
-    setActiveNoteId(note.id);
+    const emptyNote = createEmptyNote();
+    setNotes([emptyNote]);
+    setActiveNoteId(emptyNote.id);
     restoredVaultRef.current = false;
-  }, []);
+  }, [confirmDiscardUnsavedChanges]);
 
   const handleVaultDirectoryClick = useCallback((entry: VaultTreeEntry) => {
     setSelectedVaultDir(entry.relativePath);
@@ -1303,209 +1565,6 @@ export default function App() {
   }, [expandedDirs, loadVaultDirectory]);
 
   const modeCommandId = editorMode === "plain" ? "view.setRichEdit" : "view.setPlainEdit";
-  const renderVaultEntry = (entry: VaultTreeEntry, depth = 0) => (
-    <div key={entry.path} className="workspace-entry">
-      <div
-        className={[
-          "workspace-row",
-          entry.kind,
-          entry.path === activeNote.filePath ? "active" : "",
-          entry.kind === "directory" && entry.relativePath === selectedVaultDir ? "selected" : "",
-        ].filter(Boolean).join(" ")}
-        style={{ "--tree-depth": depth } as CSSProperties}
-      >
-        <button
-          type="button"
-          className="workspace-name"
-          onClick={() => {
-            if (entry.kind === "directory") {
-              handleVaultDirectoryClick(entry);
-            } else {
-              openMarkdownFile(entry.path).catch((error) => {
-                console.error("Failed to open vault file", error);
-                setVaultError(t.errors.openVaultFileFailed);
-              });
-            }
-          }}
-        >
-          <span className="workspace-disclosure" aria-hidden="true">
-            {entry.kind === "directory"
-              ? (entry.loading ? "..." : (entry.relativePath === "" || expandedDirs.has(entry.relativePath) ? "▾" : "▸"))
-              : "·"}
-          </span>
-          <span className="workspace-label" title={entry.name}>{entry.name}</span>
-        </button>
-        {entry.relativePath ? (
-          <div className="workspace-actions">
-            <button type="button" title={t.prompts.renameAction} onClick={() => handleRenameVaultEntry(entry)}>
-              {t.prompts.renameShort}
-            </button>
-            <button type="button" title={t.prompts.deleteAction} onClick={() => handleDeleteVaultEntry(entry)}>
-              {t.prompts.deleteShort}
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {entry.loadError ? (
-        <p className="workspace-entry-note" style={{ "--tree-depth": depth } as CSSProperties}>
-          {entry.loadError}
-        </p>
-      ) : null}
-      {entry.truncated ? (
-        <p className="workspace-entry-note" style={{ "--tree-depth": depth } as CSSProperties}>
-          {t.sidebar.resultLimitReached}
-        </p>
-      ) : null}
-      {entry.kind === "directory" && (entry.relativePath === "" || expandedDirs.has(entry.relativePath)) && entry.children.length ? (
-        <div className="workspace-children">
-          {entry.children.map((child) => renderVaultEntry(child, depth + 1))}
-        </div>
-      ) : null}
-    </div>
-  );
-
-  const renderKnowledgePanel = (mode: "docked" | "floating") => (
-    <section className={`knowledge-panel ${mode}`}>
-      {mode === "floating" ? (
-        <div
-          className="floating-panel-titlebar"
-          onPointerDown={handleFloatingPanelPointerDown}
-          onDoubleClick={() => setKnowledgePanelFloating(false)}
-        >
-          <strong>{t.knowledge.title}</strong>
-          <button type="button" onClick={() => setKnowledgePanelFloating(false)}>{t.knowledge.dock}</button>
-        </div>
-      ) : null}
-
-      <div className="knowledge-tabs" role="tablist" aria-label={t.knowledge.tabsAria}>
-        {(["backlinks", "graph"] as KnowledgePanelTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={knowledgePanelTab === tab}
-            className={knowledgePanelTab === tab ? "selected" : ""}
-            onClick={() => setKnowledgePanelTab(tab)}
-          >
-            {tab === "backlinks" ? t.knowledge.backlinks : t.knowledge.graph}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="panel-mode-button"
-          onClick={() => setKnowledgePanelFloating((floating) => !floating)}
-        >
-          {mode === "floating" ? t.knowledge.dock : t.knowledge.float}
-        </button>
-      </div>
-
-      {vaultMode ? (
-        <div className="index-status">
-          {vaultIndexStatus === "indexing" ? t.knowledge.indexing : null}
-          {vaultIndexStatus === "error" ? vaultIndexError : null}
-          {vaultIndex?.truncated ? t.knowledge.indexPartial : null}
-          {vaultIndex?.skippedFiles ? t.knowledge.skippedFiles(vaultIndex.skippedFiles) : null}
-        </div>
-      ) : null}
-
-      {knowledgePanelTab === "backlinks" ? (
-        <div className="link-list" role="tabpanel">
-          {activeBacklinks.length ? activeBacklinks.map((backlink, index) => (
-            <button
-              key={`${backlink.targetPath}-${index}`}
-              type="button"
-              className="link-item"
-              onClick={() => backlink.targetPath && handleGraphNodeClick(backlink.targetPath)}
-            >
-              <strong>{backlink.label}</strong>
-              <span>{backlink.rawTarget}</span>
-            </button>
-          )) : (
-            <p className="muted">
-              {vaultMode ? t.knowledge.noBacklinks : t.knowledge.openVaultForBacklinks}
-            </p>
-          )}
-        </div>
-      ) : null}
-
-      {knowledgePanelTab === "graph" ? (
-        <div className="local-graph" role="tabpanel">
-          {localGraph.nodes.length ? (
-            <>
-              <svg viewBox="0 0 100 100" role="img" aria-label={t.knowledge.localGraphAria}>
-                {localGraph.edges.map((edge) => {
-                  const source = localGraphNodeMap.get(normalizeFilePath(edge.sourcePath));
-                  const target = localGraphNodeMap.get(normalizeFilePath(edge.targetPath));
-                  if (!source || !target) return null;
-                  return (
-                    <line
-                      key={edge.id}
-                      x1={source.x}
-                      y1={source.y}
-                      x2={target.x}
-                      y2={target.y}
-                      className="graph-edge"
-                    />
-                  );
-                })}
-                {localGraph.nodes.map((node) => (
-                  <g
-                    key={node.path}
-                    className={`graph-node ${node.role}`}
-                    transform={`translate(${node.x} ${node.y})`}
-                    onClick={() => handleGraphNodeClick(node.path)}
-                  >
-                    <circle r={node.role === "current" ? 5.4 : 4.2} />
-                    <text y={node.role === "current" ? -8 : -6}>{node.title}</text>
-                  </g>
-                ))}
-              </svg>
-              <p className="graph-note">
-                {localGraph.edges.length
-                  ? t.knowledge.graphSummary(localGraph.nodes.length, localGraph.edges.length)
-                  : t.knowledge.graphOnlyCurrent}
-              </p>
-            </>
-          ) : (
-            <p className="muted">
-              {!vaultMode
-                ? t.knowledge.openVaultForGraph
-                : vaultIndexStatus === "indexing"
-                  ? t.knowledge.indexing
-                  : t.knowledge.currentFileNotIndexed}
-            </p>
-          )}
-          {activeUnresolvedLinks.length ? (
-            <div className="unresolved-links">
-              <strong>{t.knowledge.unresolvedLinks}</strong>
-              {activeUnresolvedLinks.slice(0, 5).map((link, index) => (
-                <span key={`${link.rawTarget}-${index}`} title={link.unresolvedReason ?? ""}>
-                  {link.rawTarget}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <dl className="info-grid compact">
-        <dt>{t.knowledge.file}</dt>
-        <dd title={activeNote.filePath ?? ""}>{activeNote.fileName ?? t.knowledge.unsavedNote}</dd>
-        <dt>{t.knowledge.type}</dt>
-        <dd>{activeNote.fileExt ? `.${activeNote.fileExt}` : "Markdown"}</dd>
-        <dt>{t.knowledge.lines}</dt>
-        <dd>{lineCount}</dd>
-        <dt>{t.knowledge.words}</dt>
-        <dd>{textStats.words}</dd>
-        <dt>{t.knowledge.characters}</dt>
-        <dd>{textStats.characters}</dd>
-        <dt>{t.knowledge.links}</dt>
-        <dd>{activeResolvedLinks.length}/{activeOutgoingLinks.length}</dd>
-        <dt>{t.knowledge.tags}</dt>
-        <dd>{activeIndexedFile?.tags.length ? activeIndexedFile.tags.map((tag) => `#${tag}`).join(", ") : t.knowledge.none}</dd>
-      </dl>
-    </section>
-  );
 
   return (
     <div
@@ -1525,180 +1584,57 @@ export default function App() {
         "--editor-left-gap": `${editorLeftGap}px`,
       } as CSSProperties}
     >
-      <div className="app-chrome">
-        <header
-          className="window-titlebar"
-          aria-label={t.aria.titlebar}
-          onMouseDown={handleChromeDragMouseDown}
-          onDoubleClick={handleChromeDoubleClick}
-        >
-          <strong className="window-title" title={windowTitle} data-tauri-drag-region>{windowTitle}</strong>
-          <div className="titlebar-drag-region" data-tauri-drag-region />
-          <div className="window-controls" aria-label={t.aria.windowControls}>
-            <button type="button" aria-label={t.aria.minimize} onClick={() => handleWindowAction("minimize")}>-</button>
-            <button type="button" aria-label={t.aria.maximize} onClick={() => handleWindowAction("maximize")}>□</button>
-            <button type="button" className="close" aria-label={t.aria.closeWindow} onClick={() => handleWindowAction("close")}>×</button>
-          </div>
-        </header>
-
-        <header
-          ref={menuBarRef}
-          className="menu-bar"
-          aria-label={t.aria.appMenu}
-          onMouseDown={handleChromeDragMouseDown}
-          onDoubleClick={handleChromeDoubleClick}
-        >
-          <div className="menu-left">
-            <nav className="main-menu" aria-label={t.aria.mainMenu}>
-              {menuGroups.map((group) => (
-                <div key={group.id} className="menu-root">
-                  <button
-                    type="button"
-                    aria-expanded={openMenuId === group.id}
-                    className={openMenuId === group.id ? "menu-root-button open" : "menu-root-button"}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenMenuId(group.id);
-                    }}
-                    onMouseEnter={() => {
-                      setOpenMenuId((current) => (current ? group.id : current));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      setOpenMenuId(group.id);
-                    }}
-                  >
-                    {t.menuGroups[group.id as keyof typeof t.menuGroups] ?? group.label}
-                  </button>
-                  {openMenuId === group.id ? (
-                    <div className="menu-popover" role="menu">
-                      {group.items.map((item) => {
-                        const command = item.commandId ? commands[item.commandId] : null;
-                        const disabled = item.disabled || !command?.enabled;
-
-                        return (
-                          <button
-                            key={`${group.id}-${item.label}`}
-                            type="button"
-                            role="menuitem"
-                            disabled={disabled}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={() => {
-                              if (item.commandId) dispatchCommand(item.commandId);
-                            }}
-                          >
-                            <span>{item.commandId ? (t.commandLabels[item.commandId as keyof typeof t.commandLabels] ?? item.label) : item.label}</span>
-                            <kbd>{getShortcutForCommand(shortcuts, item.commandId)}</kbd>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </nav>
-          </div>
-
-          <div className="menu-status">
-            <span>{saveStatus === "saved" ? t.status.saved : saveError ?? (savedAt ? `${t.status.saved} ${formatTime(savedAt)}` : t.status.memoryDraft)}</span>
-            <button type="button" onClick={() => dispatchCommand(modeCommandId)}>
-              {editorMode === "plain" ? t.modeNames.rich : t.modeNames.plain}
-            </button>
-            <button type="button" onClick={() => dispatchCommand("app.openSettings")}>{t.commandLabels["app.openSettings"]}</button>
-          </div>
-        </header>
-      </div>
+      <WindowChrome
+        t={t}
+        windowTitle={windowTitle}
+        menuBarRef={menuBarRef}
+        openMenuId={openMenuId}
+        commands={commands}
+        shortcuts={shortcuts}
+        saveStatus={saveStatus}
+        saveError={saveError}
+        savedAt={savedAt}
+        hasActiveDocument={hasActiveDocument}
+        editorMode={editorMode}
+        modeCommandId={modeCommandId}
+        onChromeMouseDown={handleChromeDragMouseDown}
+        onChromeDoubleClick={handleChromeDoubleClick}
+        onWindowAction={handleWindowAction}
+        onOpenMenu={setOpenMenuId}
+        onDispatchCommand={dispatchCommand}
+      />
 
       {sidebarVisible ? (
-        <aside className="left-rail">
-          <div className="sidebar-tabs" role="tablist" aria-label={t.aria.sidebarSections}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={leftPanelTab === "files"}
-              className={leftPanelTab === "files" ? "selected" : ""}
-              onClick={() => setLeftPanelTab("files")}
-            >
-              {t.sidebar.files}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={leftPanelTab === "outline"}
-              className={leftPanelTab === "outline" ? "selected" : ""}
-              onClick={() => setLeftPanelTab("outline")}
-            >
-              {t.sidebar.outline}
-            </button>
-          </div>
-
-          {leftPanelTab === "files" && vaultMode ? (
-            <>
-              <div className="workspace-root" title={vaultRoot ?? ""}>
-                {vaultTree?.name ?? t.sidebar.vault}
-                <button type="button" onClick={() => dispatchCommand("file.openVault")}>{t.sidebar.open}</button>
-              </div>
-              {vaultError ? <p className="workspace-error">{vaultError}</p> : null}
-              <nav className="workspace-tree" aria-label={t.sidebar.vaultFiles}>
-                {vaultTree ? renderVaultEntry(vaultTree) : <p className="muted">{t.sidebar.loadingVault}</p>}
-                {vaultRecoveryBlocked ? (
-                  <button type="button" className="workspace-clear" onClick={clearVaultState}>
-                    {t.sidebar.clearVaultState}
-                  </button>
-                ) : null}
-              </nav>
-            </>
-          ) : null}
-
-          {leftPanelTab === "files" && !vaultMode ? (
-            <div className="placeholder-list">
-              <button type="button" onClick={() => dispatchCommand("file.openVault")}>{t.sidebar.openLocalFolder}</button>
-              <button type="button" onClick={() => dispatchCommand("file.open")}>{t.sidebar.openStandaloneMarkdown}</button>
-            </div>
-          ) : null}
-
-          {leftPanelTab === "outline" ? (
-            <div className="outline-list sidebar-outline" role="tabpanel">
-              {outline.length ? outline.map((item, index) => (
-                <button
-                  key={`${item.text}-${index}`}
-                  type="button"
-                  className={`outline-item level-${item.level}`}
-                  onClick={() => handleOutlineClick(index)}
-                >
-                  {item.text}
-                </button>
-              )) : <p className="muted">{t.sidebar.noHeadings}</p>}
-            </div>
-          ) : null}
-
-          {leftPanelTab === "files" && !vaultMode ? (
-            <>
-              <div className="panel-heading compact">
-                <span>{t.sidebar.openNotes}</span>
-              </div>
-              <nav className="card-list" aria-label={t.sidebar.openNotes}>
-                {notes.map((note) => (
-                  <button
-                    key={note.id}
-                    type="button"
-                    className={note.id === activeNote.id ? "card-item active" : "card-item"}
-                    onClick={() => setActiveNoteId(note.id)}
-                  >
-                    <strong>{note.title}</strong>
-                    <span>{note.filePath ?? note.markdown.split("\n").find((line) => line.trim() && !line.startsWith("#")) ?? t.sidebar.markdownNote}</span>
-                  </button>
-                ))}
-              </nav>
-            </>
-          ) : null}
-
-          {leftPanelTab === "files" ? (
-            <button type="button" className="new-note-fab" aria-label={t.sidebar.newNote} onClick={() => dispatchCommand("file.new")}>+</button>
-          ) : null}
-        </aside>
+        <VaultSidebar
+          t={t}
+          tab={leftPanelTab}
+          vaultMode={vaultMode}
+          vaultRoot={vaultRoot}
+          vaultTree={vaultTree}
+          vaultError={vaultError}
+          vaultRecoveryBlocked={vaultRecoveryBlocked}
+          expandedDirs={expandedDirs}
+          selectedVaultDir={selectedVaultDir}
+          activeFilePath={activeNote.filePath ?? null}
+          activeNote={activeNote}
+          notes={notes}
+          outline={outline}
+          onTabChange={setLeftPanelTab}
+          onDispatchCommand={dispatchCommand}
+          onOpenMarkdownFile={(path) => {
+            openMarkdownFile(path).catch((error) => {
+              console.error("Failed to open vault file", error);
+              setVaultError(t.errors.openVaultFileFailed);
+            });
+          }}
+          onVaultError={setVaultError}
+          onVaultDirectoryClick={handleVaultDirectoryClick}
+          onRenameVaultEntry={handleRenameVaultEntry}
+          onDeleteVaultEntry={handleDeleteVaultEntry}
+          onClearVaultState={clearVaultState}
+          onOutlineClick={handleOutlineClick}
+          onSelectNote={setActiveNoteId}
+        />
       ) : null}
 
       {sidebarVisible ? (
@@ -1711,28 +1647,17 @@ export default function App() {
         />
       ) : null}
 
-      <main className="editor-column">
-        <section ref={editorSurfaceRef} className="editor-surface" aria-label={t.aria.markdownEditor}>
-          {editorMode === "plain" ? (
-            <textarea
-              ref={plainEditorRef}
-              className="markdown-editor"
-              value={activeNote.markdown}
-              onChange={(event) => handleMarkdownChange(event.target.value)}
-              spellCheck
-            />
-          ) : (
-            <Suspense fallback={<div className="editor-loading">{t.aria.loadingRichEditor}</div>}>
-              <MilkdownEditor
-                key={activeNote.id}
-                markdown={activeNote.markdown}
-                onChange={handleMarkdownChange}
-                command={richCommand}
-              />
-            </Suspense>
-          )}
-        </section>
-      </main>
+      <EditorWorkspace
+        t={t}
+        activeNote={activeNote}
+        hasActiveDocument={hasActiveDocument}
+        editorMode={editorMode}
+        richCommand={richCommand}
+        editorSurfaceRef={editorSurfaceRef}
+        plainEditorRef={plainEditorRef}
+        onMarkdownChange={handleMarkdownChange}
+        onOpenLink={handleEditorLinkOpen}
+      />
 
       {rightPanelVisible && !knowledgePanelFloating ? (
         <div
@@ -1745,312 +1670,134 @@ export default function App() {
       ) : null}
 
       {rightPanelVisible && !knowledgePanelFloating ? (
-        <aside className="right-rail" aria-label={t.aria.knowledgePanels}>
-          {renderKnowledgePanel("docked")}
-        </aside>
+        <KnowledgeRail
+          t={t}
+          mode="docked"
+          tab={knowledgePanelTab}
+          vaultMode={vaultMode}
+          vaultIndex={vaultIndex}
+          vaultIndexStatus={vaultIndexStatus}
+          vaultIndexError={vaultIndexError}
+          activeNote={activeNote}
+          activeIndexedFile={activeIndexedFile}
+          activeBacklinks={activeBacklinks}
+          activeOutgoingLinks={activeOutgoingLinks}
+          activeResolvedLinks={activeResolvedLinks}
+          activeUnresolvedLinks={activeUnresolvedLinks}
+          localGraph={localGraph}
+          lineCount={lineCount}
+          textStats={textStats}
+          onTabChange={setKnowledgePanelTab}
+          onToggleFloating={() => setKnowledgePanelFloating((floating) => !floating)}
+          onFloatingPointerDown={handleFloatingPanelPointerDown}
+          onGraphNodeClick={handleGraphNodeClick}
+        />
       ) : null}
 
       {rightPanelVisible && knowledgePanelFloating ? (
-        <aside
-          className="floating-knowledge-panel"
-          aria-label={t.aria.floatingKnowledgePanel}
-          style={{
-            "--floating-panel-x": `${floatingPanelPosition.x}px`,
-            "--floating-panel-y": `${floatingPanelPosition.y}px`,
-          } as CSSProperties}
-        >
-          {renderKnowledgePanel("floating")}
-        </aside>
+        <KnowledgeRail
+          t={t}
+          mode="floating"
+          tab={knowledgePanelTab}
+          vaultMode={vaultMode}
+          vaultIndex={vaultIndex}
+          vaultIndexStatus={vaultIndexStatus}
+          vaultIndexError={vaultIndexError}
+          activeNote={activeNote}
+          activeIndexedFile={activeIndexedFile}
+          activeBacklinks={activeBacklinks}
+          activeOutgoingLinks={activeOutgoingLinks}
+          activeResolvedLinks={activeResolvedLinks}
+          activeUnresolvedLinks={activeUnresolvedLinks}
+          localGraph={localGraph}
+          lineCount={lineCount}
+          textStats={textStats}
+          floatingPanelPosition={floatingPanelPosition}
+          onTabChange={setKnowledgePanelTab}
+          onToggleFloating={() => setKnowledgePanelFloating((floating) => !floating)}
+          onFloatingPointerDown={handleFloatingPanelPointerDown}
+          onGraphNodeClick={handleGraphNodeClick}
+        />
       ) : null}
 
-      {appDialog ? (
-        <div className="app-dialog-backdrop" role="presentation" onMouseDown={() => closeAppDialog(appDialog.kind === "confirm" ? false : null)}>
-          <form
-            className="app-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label={appDialog.title}
-            onMouseDown={(event) => event.stopPropagation()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (appDialog.kind === "input") {
-                closeAppDialog(appDialogInput);
-                return;
-              }
-              closeAppDialog(true);
-            }}
-          >
-            <div className="app-dialog-header">
-              <h2>{appDialog.title}</h2>
-            </div>
-            {appDialog.message ? <p className="app-dialog-message">{appDialog.message}</p> : null}
-            {appDialog.kind === "input" ? (
-              <input
-                ref={appDialogInputRef}
-                value={appDialogInput}
-                onChange={(event) => setAppDialogInput(event.target.value)}
-              />
-            ) : null}
-            <div className="app-dialog-actions">
-              {appDialog.cancelLabel ? (
-                <button
-                  type="button"
-                  className="app-dialog-secondary"
-                  onClick={() => closeAppDialog(appDialog.kind === "confirm" ? false : null)}
-                >
-                  {appDialog.cancelLabel}
-                </button>
-              ) : null}
-              <button type="submit" className={appDialog.danger ? "app-dialog-danger" : "app-dialog-primary"}>
-                {appDialog.confirmLabel}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <AppDialogHost
+        dialog={appDialog}
+        input={appDialogInput}
+        inputRef={appDialogInputRef}
+        onInputChange={setAppDialogInput}
+        onClose={closeAppDialog}
+      />
 
-      {settingsOpen ? (
-        <div className="settings-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
-          <section className="settings-panel" role="dialog" aria-modal="true" aria-label={t.aria.settingsDialog} onMouseDown={(event) => event.stopPropagation()}>
-            <div className="settings-header">
-              <h2>{t.settings.title}</h2>
-              <button type="button" onClick={() => setSettingsOpen(false)}>{t.settings.close}</button>
-            </div>
+      <SettingsDialog
+        open={settingsOpen}
+        t={t}
+        language={language}
+        section={settingsSection}
+        defaultEditorModeSetting={defaultEditorModeSetting}
+        restoreWorkspace={restoreWorkspace}
+        sidebarVisible={sidebarVisible}
+        rightPanelVisible={rightPanelVisible}
+        editorLatinFont={editorLatinFont}
+        editorCjkFont={editorCjkFont}
+        editorFontSize={editorFontSize}
+        editorLineHeight={editorLineHeight}
+        uiScale={uiScale}
+        zoomWithWheel={zoomWithWheel}
+        editorLeftGap={editorLeftGap}
+        sidebarWidth={sidebarWidth}
+        rightPanelWidth={rightPanelWidth}
+        shortcuts={shortcuts}
+        shortcutEdits={shortcutEdits}
+        shortcutConflicts={shortcutConflicts}
+        theme={theme}
+        uiDensity={uiDensity}
+        defaultSaveExt={defaultSaveExt}
+        defaultNewNoteName={defaultNewNoteName}
+        vaultRoot={vaultRoot}
+        lastOpenedFile={lastOpenedFile}
+        onClose={() => setSettingsOpen(false)}
+        onSectionChange={setSettingsSection}
+        onLanguageChange={setLanguage}
+        onDefaultEditorModeChange={setDefaultEditorModeSetting}
+        onRestoreWorkspaceChange={setRestoreWorkspace}
+        onSidebarVisibleChange={setSidebarVisible}
+        onRightPanelVisibleChange={setRightPanelVisible}
+        onEditorLatinFontChange={setEditorLatinFont}
+        onEditorCjkFontChange={setEditorCjkFont}
+        onEditorFontSizeChange={setEditorFontSize}
+        onEditorLineHeightChange={setEditorLineHeight}
+        onUiScaleChange={(value) => setUiScale(clampUiScale(value))}
+        onZoomWithWheelChange={setZoomWithWheel}
+        onEditorLeftGapChange={(value) => setEditorLeftGap(clampEditorLeftGap(value))}
+        onSidebarWidthChange={(value) => setSidebarWidth(clampSidebarWidth(value))}
+        onRightPanelWidthChange={(value) => setRightPanelWidth(clampRightPanelWidth(value))}
+        onResetEditorLayout={() => {
+          const defaults = resetEditorLayoutDefaults();
+          setEditorLatinFont(defaults.editorLatinFont);
+          setEditorCjkFont(defaults.editorCjkFont);
+          setEditorFontSize(defaults.editorFontSize);
+          setEditorLineHeight(defaults.editorLineHeight);
+          setEditorLeftGap(defaults.editorLeftGap);
+          setUiScale(defaults.uiScale);
+          setSidebarWidth(defaults.sidebarWidth);
+          setRightPanelWidth(defaults.rightPanelWidth);
+        }}
+        onShortcutEditChange={(shortcutId, value) => setShortcutEdits((current) => ({ ...current, [shortcutId]: value }))}
+        onShortcutInputBlur={handleShortcutInputBlur}
+        onShortcutRestore={handleShortcutRestore}
+        onShortcutRestoreAll={handleShortcutRestoreAll}
+        onShortcutEnabledChange={updateShortcutEnabled}
+        onThemeCommand={dispatchCommand}
+        onUiDensityChange={setUiDensity}
+        onDefaultSaveExtChange={setDefaultSaveExt}
+        onDefaultNewNoteNameChange={setDefaultNewNoteName}
+        onDefaultNewNoteNameBlur={() => setDefaultNewNoteName((current) => normalizeDefaultNewNoteName(current))}
+        onClearVaultState={clearVaultState}
+      />
 
-            <div className="settings-layout">
-              <nav className="settings-nav" aria-label={t.settings.navAria}>
-                {settingsSections.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    className={settingsSection === section.id ? "selected" : ""}
-                    onClick={() => setSettingsSection(section.id)}
-                  >
-                    {t.sectionLabels[section.id]}
-                  </button>
-                ))}
-              </nav>
-
-              <div className="settings-content">
-                {settingsSection === "general" ? (
-                  <div className="settings-section">
-                    <h3>{t.settings.general}</h3>
-                    <label className="settings-field">
-                      <span>{t.settings.language}</span>
-                      <select value={language} onChange={(event) => setLanguage(event.target.value as AppLanguage)}>
-                        {appLanguages.map((item) => (
-                          <option key={item.id} value={item.id}>{item.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.defaultEditMode}</span>
-                      <select value={defaultEditorModeSetting} onChange={(event) => setDefaultEditorModeSetting(event.target.value as EditorMode)}>
-                        <option value="plain">{t.modeNames.plain}</option>
-                        <option value="rich">{t.modeNames.rich}</option>
-                      </select>
-                    </label>
-                    <label className="settings-check">
-                      <input type="checkbox" checked={restoreWorkspace} onChange={(event) => setRestoreWorkspace(event.target.checked)} />
-                      {t.settings.restoreLastVault}
-                    </label>
-                    <label className="settings-check">
-                      <input type="checkbox" checked={sidebarVisible} onChange={(event) => setSidebarVisible(event.target.checked)} />
-                      {t.settings.showVaultSidebar}
-                    </label>
-                    <label className="settings-check">
-                      <input type="checkbox" checked={rightPanelVisible} onChange={(event) => setRightPanelVisible(event.target.checked)} />
-                      {t.settings.showKnowledgePanel}
-                    </label>
-                  </div>
-                ) : null}
-
-                {settingsSection === "editor" ? (
-                  <div className="settings-section">
-                    <h3>{t.settings.editor}</h3>
-                    <label className="settings-field">
-                      <span>{t.settings.englishFont}</span>
-                      <select
-                        value={editorLatinFont}
-                        onChange={(event) => setEditorLatinFont(event.target.value)}
-                      >
-                        {editorLatinFontOptions.map((font) => (
-                          <option key={font} value={font}>{font}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.chineseFont}</span>
-                      <select
-                        value={editorCjkFont}
-                        onChange={(event) => setEditorCjkFont(event.target.value)}
-                      >
-                        {editorCjkFontOptions.map((font) => (
-                          <option key={font} value={font}>{font}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.fontSize}</span>
-                      <select value={editorFontSize} onChange={(event) => setEditorFontSize(Number(event.target.value))}>
-                        {editorFontSizeOptions.map((item) => (
-                          <option key={item.value} value={item.value}>
-                            {language === "zh-CN" ? item.zh : item.en}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.lineHeight}</span>
-                      <input type="number" min={1.4} max={2.2} step={0.05} value={editorLineHeight} onChange={(event) => setEditorLineHeight(Number(event.target.value))} />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.uiFontScale}</span>
-                      <input type="number" min={MIN_UI_SCALE} max={MAX_UI_SCALE} step={5} value={uiScale} onChange={(event) => setUiScale(clampUiScale(Number(event.target.value)))} />
-                    </label>
-                    <label className="settings-check">
-                      <input type="checkbox" checked={zoomWithWheel} onChange={(event) => setZoomWithWheel(event.target.checked)} />
-                      {t.settings.zoomWithWheel}
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.layoutLeftGap}</span>
-                      <input type="number" min={MIN_EDITOR_LEFT_GAP} max={MAX_EDITOR_LEFT_GAP} value={editorLeftGap} onChange={(event) => setEditorLeftGap(clampEditorLeftGap(Number(event.target.value)))} />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.sidebarWidth}</span>
-                      <input type="number" min={MIN_SIDEBAR_WIDTH} max={MAX_SIDEBAR_WIDTH} value={sidebarWidth} onChange={(event) => setSidebarWidth(clampSidebarWidth(Number(event.target.value)))} />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.rightPanelWidth}</span>
-                      <input type="number" min={MIN_RIGHT_PANEL_WIDTH} max={MAX_RIGHT_PANEL_WIDTH} value={rightPanelWidth} onChange={(event) => setRightPanelWidth(clampRightPanelWidth(Number(event.target.value)))} />
-                    </label>
-                    <button
-                      type="button"
-                      className="settings-secondary"
-                      onClick={() => {
-                        setEditorLatinFont(defaultSettings.editorLatinFont);
-                        setEditorCjkFont(defaultSettings.editorCjkFont);
-                        setEditorFontSize(defaultSettings.editorFontSize);
-                        setEditorLineHeight(defaultSettings.editorLineHeight);
-                        setEditorLeftGap(defaultSettings.editorLeftGap);
-                        setUiScale(defaultSettings.uiScale);
-                        setSidebarWidth(defaultSettings.sidebarWidth);
-                        setRightPanelWidth(defaultSettings.rightPanelWidth);
-                      }}
-                    >
-                      {t.settings.resetEditorLayout}
-                    </button>
-                  </div>
-                ) : null}
-
-                {settingsSection === "shortcuts" ? (
-                  <div className="settings-section">
-                    <div className="settings-section-title">
-                      <h3>{t.settings.shortcuts}</h3>
-                      <button type="button" onClick={handleShortcutRestoreAll}>{t.settings.restoreDefaults}</button>
-                    </div>
-                    {shortcutConflicts.size ? (
-                      <p className="shortcut-warning">
-                        {t.settings.shortcutConflict}: {Array.from(shortcutConflicts.keys()).join(", ")}
-                      </p>
-                    ) : null}
-                    <div className="shortcut-table">
-                      {shortcuts.map((shortcut) => {
-                        const rowConflicts = shortcut.currentKeys.some((key) => shortcutConflicts.has(key));
-
-                        return (
-                          <div key={shortcut.id} className={rowConflicts ? "shortcut-row conflict" : "shortcut-row"}>
-                            <div>
-                              <strong>{t.commandLabels[shortcut.commandId as keyof typeof t.commandLabels] ?? shortcut.label}</strong>
-                              <span>{t.shortcutCategories[shortcut.category]} · {shortcut.commandId}</span>
-                            </div>
-                            <input
-                              value={shortcutEdits[shortcut.id] ?? ""}
-                              disabled={!shortcut.editable}
-                              aria-label={t.aria.shortcutInput(t.commandLabels[shortcut.commandId as keyof typeof t.commandLabels] ?? shortcut.label)}
-                              onChange={(event) => setShortcutEdits((current) => ({ ...current, [shortcut.id]: event.target.value }))}
-                              onKeyDown={(event) => {
-                                event.stopPropagation();
-                                if (event.key === "Enter") event.currentTarget.blur();
-                              }}
-                              onBlur={() => handleShortcutInputBlur(shortcut.id)}
-                            />
-                            <label className="shortcut-enabled">
-                              <input type="checkbox" checked={shortcut.enabled} onChange={(event) => updateShortcutEnabled(shortcut.id, event.target.checked)} />
-                              {t.settings.enabled}
-                            </label>
-                            <button type="button" onClick={() => handleShortcutRestore(shortcut.id)}>{t.settings.default}</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-
-                {settingsSection === "appearance" ? (
-                  <div className="settings-section">
-                    <h3>{t.settings.appearance}</h3>
-                    <div className="theme-options">
-                      <button type="button" className={theme === "daily" ? "theme-option selected" : "theme-option"} onClick={() => dispatchCommand("theme.daily")}>
-                        <span className="theme-swatch daily" />
-                        <strong>Daily</strong>
-                        <span>{t.themeDescriptions.daily}</span>
-                      </button>
-                      <button type="button" className={theme === "eye" ? "theme-option selected" : "theme-option"} onClick={() => dispatchCommand("theme.eye")}>
-                        <span className="theme-swatch eye" />
-                        <strong>Eye Care</strong>
-                        <span>{t.themeDescriptions.eye}</span>
-                      </button>
-                      <button type="button" className={theme === "mint" ? "theme-option selected" : "theme-option"} onClick={() => dispatchCommand("theme.mint")}>
-                        <span className="theme-swatch mint" />
-                        <strong>Mint</strong>
-                        <span>{t.themeDescriptions.mint}</span>
-                      </button>
-                      <button type="button" className={theme === "ink" ? "theme-option selected" : "theme-option"} onClick={() => dispatchCommand("theme.ink")}>
-                        <span className="theme-swatch ink" />
-                        <strong>Dark</strong>
-                        <span>{t.themeDescriptions.ink}</span>
-                      </button>
-                    </div>
-                    <label className="settings-field">
-                      <span>{t.settings.interfaceDensity}</span>
-                      <select value={uiDensity} onChange={(event) => setUiDensity(event.target.value as UIDensity)}>
-                        <option value="comfortable">{t.settings.comfortable}</option>
-                        <option value="compact">{t.settings.compact}</option>
-                      </select>
-                    </label>
-                  </div>
-                ) : null}
-
-                {settingsSection === "files" ? (
-                  <div className="settings-section">
-                    <h3>{t.settings.files}</h3>
-                    <label className="settings-field">
-                      <span>{t.settings.defaultSaveFormat}</span>
-                      <select value={defaultSaveExt} onChange={(event) => setDefaultSaveExt(event.target.value as SaveFileExt)}>
-                        <option value="md">.md</option>
-                        <option value="txt">.txt</option>
-                      </select>
-                    </label>
-                    <label className="settings-field">
-                      <span>{t.settings.defaultNewNoteName}</span>
-                      <input
-                        value={defaultNewNoteName}
-                        onChange={(event) => setDefaultNewNoteName(event.target.value)}
-                        onBlur={() => setDefaultNewNoteName((current) => normalizeDefaultNewNoteName(current))}
-                      />
-                    </label>
-                    <p>{t.settings.vaultMetadata}: <code>.serein/vault.json</code> / <code>.serein/workspace.json</code></p>
-                    <p>{t.settings.vaultRoot}: <code>{vaultRoot ?? t.settings.none}</code></p>
-                    <p>{t.settings.lastOpenedFile}: <code>{lastOpenedFile ?? t.settings.none}</code></p>
-                    <button type="button" className="settings-danger" onClick={clearVaultState}>
-                      {t.settings.clearLastVaultState}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
+      {toastMessage ? (
+        <div className="app-toast" role="status" aria-live="polite">
+          {toastMessage}
         </div>
       ) : null}
     </div>

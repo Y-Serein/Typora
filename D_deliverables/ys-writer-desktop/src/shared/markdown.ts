@@ -1,5 +1,7 @@
 import type { SaveFileExt } from "../app/types";
 
+export type OutlineItem = { level: 1 | 2 | 3 | 4 | 5 | 6; text: string };
+
 export function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
